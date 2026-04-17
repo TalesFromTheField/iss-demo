@@ -1,47 +1,176 @@
-# Tracking International Space Station with Microsoft Fabric
+<p align="center">
+  <img src="./images/tftf-logo.png" alt="Tales From the Field Logo" width="300">
+</p>
 
-### Visualizing End-to-end flow
+<h1 align="center">🛰️ ISS Tracker Demo — Tales From the Field 🚀</h1>
 
-![End-to-end flow](./images/architecture.png)
+<p align="center">
+  <em>Helping you solve real-world problems with insights from the field</em>
+</p>
 
-In this scenario, we will use –
+<p align="center">
+  <!-- CI/CD badges — update URLs once workflows are configured -->
+  <img src="https://img.shields.io/badge/build-passing-brightgreen?style=flat-square" alt="Build Status">
+  <img src="https://img.shields.io/badge/python-3.11-blue?style=flat-square&logo=python" alt="Python 3.11">
+  <img src="https://img.shields.io/badge/azure-functions-0078D4?style=flat-square&logo=azure-functions" alt="Azure Functions">
+  <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="License">
+</p>
 
-•Logic Apps to pull the current location of ISS (every 5 sec) and few other stats such as which are the astronauts in space along with their crafts, and send to an Event Stream
+---
 
-•KQL Database to store this information in real-time.
+## 📺 Video Walkthrough
 
-•KQL Query set to analyse the data ad-hoc.
+Check out the full walkthrough on YouTube! 🎬
 
-•PowerBI to visualize the recent location and astronaut details.
+<p align="center">
+  <a href="https://www.youtube.com/watch?v=iWepPEUUO_4">
+    <img src="https://img.youtube.com/vi/iWepPEUUO_4/maxresdefault.jpg" alt="ISS Tracker Demo — Tales From the Field YouTube Video" width="600">
+  </a>
+</p>
 
-### Demo setup instructions
+---
 
-#### 1. LogicApps to pull the ISS data 
+## 🚀 What Is This?
 
-We will use Open-notify API (http://open-notify.org/Open-Notify-API/) to fetch the location of ISS and astronatut info  in real-time. LogicApps flow is scheduled to run every 5 secs, and sends a notification to EventStreams using EventHub activity.
-![End-to-end flow](./images/la-flow.png)
+Ever wondered where the International Space Station is *right now*? 🌍
 
-You can import the logicapps flow from [here](./logicapps)
-There are two separate flows for fetching location and astronaut details, which sends events to two distinct Event Streams in Fabric.
+This demo tracks the **ISS in real-time** — pulling its live position every few seconds, streaming the data through Azure and Microsoft Fabric, and lighting it up on a Power BI dashboard. You get a live map of the station orbiting Earth plus details on which astronauts are currently floating around up there! 🧑‍🚀✨
 
+It's a fun, end-to-end showcase of **real-time data streaming** from the cloud to your dashboard — built with love by the Tales From the Field crew.
 
-#### 2. KQL Database to store the real-time stream
+---
 
-Follow the instructions in [this](https://learn.microsoft.com/en-us/fabric/real-time-analytics/event-streams/stream-real-time-events-from-custom-app-to-kusto) tutorial to create an Event Streams, KQL Database and add a destination to eventstream.
-Once you add a KQL Database to the destination, data will start flowing in KQL Database. 
+## 🏗️ Architecture
 
-Please note you need to configure the LogicApps flow in #1 to send data to the Event Streams endpoint created. 
+The ISS Tracker uses **Azure Functions** (Python v2) to poll the Open Notify API on a timer, push events into **Event Hubs**, and stream them through **Microsoft Fabric** into a **KQL Database** for real-time analysis and **Power BI** visualization.
 
-#### 3. KQL Queryset to analyze the data ad-hoc
+<p align="center">
+  <img src="./images/architecture.png" alt="Architecture Diagram" width="700">
+</p>
 
-Try playing with the data by using [kql queries](./kql/ISS.kql)
+**Data Flow:**
 
+```
+🌐 Open Notify API  →  ⚡ Azure Functions (timer-triggered)
+                              ↓
+                        📡 Azure Event Hubs
+                              ↓
+                        🌊 Fabric EventStreams
+                              ↓
+                        🗄️ KQL Database
+                              ↓
+                        📊 Power BI Dashboard
+```
 
-#### 4. Create a Dashboard 
+---
 
-Import the [PBI Dashboard](./PBI/ISS.pbix) and change the parameters *kusto_db_url* and *kusto_db_name* with your KQL Database URI and DB name. 
-You can configure the Dashboard to auto-refresh every 5sec to see the craft moving live.
+## ⚡ Quick Start
 
-![ISS position](./images/PBI_iss_live.png)
+Ready to deploy? Here's how to get rolling:
 
-![ISS orbit](./images/PBI_orbit.png)
+1. **☁️ Deploy Azure Infrastructure** — Follow the [Deployment Guide](docs/deployment-guide.md) to provision Azure Functions, Event Hubs, monitoring, and RBAC via Bicep + GitHub Actions.
+2. **🧵 Set Up Microsoft Fabric** — Follow the [Fabric Setup Guide](docs/fabric-setup.md) to configure EventStreams, KQL Database, and Power BI.
+3. **🎉 Watch the ISS fly!** — Open your Power BI dashboard and see the station orbit in real-time.
+
+---
+
+## 🔧 What's Automated vs Manual
+
+| Component | Status | Details |
+|---|---|---|
+| Azure Functions | ✅ Automated | Deployed via Bicep + GitHub Actions CI/CD |
+| Event Hubs | ✅ Automated | Provisioned via Bicep modules |
+| Monitoring & Alerts | ✅ Automated | Application Insights + Log Analytics via Bicep |
+| RBAC & Permissions | ✅ Automated | Role assignments configured in Bicep |
+| Fabric EventStreams | 🖱️ Manual (~5 min) | Connect Event Hubs to Fabric via portal |
+| KQL Database | 🖱️ Manual (~5 min) | Create database & set as EventStream destination |
+| Power BI Dashboard | 🖱️ Manual (~5 min) | Import `.pbix` file and configure connection |
+
+> 💡 **Total manual setup time: ~15 minutes** after the automated deployment completes!
+
+---
+
+## 📊 Screenshots
+
+Check out what the finished dashboard looks like! 🎨
+
+**🌍 Live ISS Position:**
+
+<p align="center">
+  <img src="./images/PBI_iss_live.png" alt="Power BI — Live ISS Position" width="600">
+</p>
+
+**🛰️ ISS Orbital Path:**
+
+<p align="center">
+  <img src="./images/PBI_orbit.png" alt="Power BI — ISS Orbital Path" width="600">
+</p>
+
+---
+
+## 🛠️ Tech Stack
+
+| | Technology | What It Does |
+|---|---|---|
+| 🐍 | **Python 3.11** | Azure Functions runtime language |
+| ⚡ | **Azure Functions (v2)** | Timer-triggered ISS data poller |
+| 📡 | **Azure Event Hubs** | Real-time event ingestion |
+| 🏗️ | **Bicep** | Infrastructure-as-Code for Azure resources |
+| 🔄 | **GitHub Actions** | CI/CD pipeline for automated deployments |
+| 🧵 | **Microsoft Fabric** | EventStreams + Real-Time Intelligence |
+| 🔍 | **KQL (Kusto Query Language)** | Ad-hoc data exploration and analysis |
+| 📊 | **Power BI** | Real-time dashboards and visualization |
+
+---
+
+## 📁 Project Structure
+
+```
+iss-demo/
+├── 📂 functions/              # Azure Functions (Python v2)
+│   ├── function_app.py        #   Timer-triggered ISS poller
+│   ├── requirements.txt       #   Python dependencies
+│   ├── host.json              #   Functions host config
+│   └── tests/                 #   Unit tests (pytest)
+├── 📂 infra/                  # Infrastructure-as-Code
+│   └── modules/
+│       ├── event-hubs.bicep   #   Event Hubs namespace + hubs
+│       └── monitoring.bicep   #   App Insights + Log Analytics
+├── 📂 kql/                    # Kusto queries
+│   └── ISS.kql                #   Ad-hoc ISS data analysis
+├── 📂 PBI/                    # Power BI
+│   └── ISS.pbix               #   Dashboard template
+├── 📂 logicapps/              # Legacy Logic Apps flows (reference)
+├── 📂 docs/                   # Documentation
+├── 📂 images/                 # Diagrams, screenshots, logos
+├── 📂 .github/                # GitHub Actions & templates
+├── Makefile                   # Developer command interface
+├── CHANGELOG.md               # Release history
+└── README.md                  # 👈 You are here!
+```
+
+---
+
+## 👥 Team
+
+Built with 💙 by the **Tales From the Field** crew — a bunch of field engineers who love turning real-world challenges into fun demos!
+
+| Name | GitHub |
+|---|---|
+| 🎱 Bradley Ball | [@SQLBalls](https://github.com/SQLBalls) |
+| 🚀 Josh Luedeman | [@joshluedeman](https://github.com/joshluedeman) |
+| ⚡ Neeraj Jhaveri | |
+| 🐕 Daniel Taylor | [@DBABulldog](https://github.com/DBABulldog) |
+| 🧰 Brad Schacht | |
+
+---
+
+## ⚖️ Disclaimer
+
+> We all work for Microsoft, but this channel is not affiliated with Microsoft and any opinions expressed are ours alone.
+
+---
+
+<p align="center">
+  Made with ☕ and 🚀 by <strong>Tales From the Field</strong>
+</p>
