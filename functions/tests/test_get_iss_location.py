@@ -49,7 +49,7 @@ class TestGetIssLocation:
         get_iss_location(timer, output)
 
         mock_fetch.assert_called_once_with(
-            "http://api.open-notify.org/iss-now.json",
+            "https://api.open-notify.org/iss-now.json",
             timeout=10, retries=1, backoff=2,
         )
 

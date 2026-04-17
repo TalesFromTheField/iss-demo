@@ -8,8 +8,8 @@ They are marked with @pytest.mark.integration and can be run with:
 import pytest
 import requests
 
-ISS_LOCATION_URL = "http://api.open-notify.org/iss-now.json"
-ASTRONAUTS_URL = "http://api.open-notify.org/astros.json"
+ISS_LOCATION_URL = "https://api.open-notify.org/iss-now.json"
+ASTRONAUTS_URL = "https://api.open-notify.org/astros.json"
 REQUEST_TIMEOUT = 15
 
 

@@ -154,7 +154,7 @@ def _fetch_with_retry(url: str, timeout: int = 10, retries: int = 1, backoff: in
 - **Transient failures happen.** Network blips, DNS hiccups, API rate limits —
   the internet is messy. A single retry with exponential backoff handles most
   transient issues.
-- **Exponential backoff** (`2s → 4s → 8s…`) is kind to the upstream API. We
+- **Exponential backoff** (`2s` on retry) is kind to the upstream API. We
   don't slam a struggling server with rapid-fire retries.
 - **Both functions share it** — DRY principle in action! One behavior, one
   place to fix it.
@@ -601,7 +601,7 @@ Power BI uses **DirectQuery** mode against the KQL Database, meaning:
 
 - **No data import/cache** — every visual refresh queries the KQL DB live
 - **Auto-refresh interval** — the report page refreshes on a configurable
-  timer (typically every 10–30 seconds)
+  timer (every 5 seconds with DirectQuery on supported Fabric capacities)
 - **Always fresh** — you see the ISS position as it was seconds ago, not hours
 
 ### Connecting to the KQL Database
@@ -810,21 +810,21 @@ safety net that catches issues before they hit production.
 | **Validate Infra** | — (parallel start) | `az bicep build --file infra/main.bicep` — compiles Bicep to ARM to catch errors |
 | **Build** | Lint ✅ + Unit Tests ✅ | Packages the function app into a zip artifact (excludes tests and local settings) |
 
-### CD Pipeline (Planned) 🔮
+### CD Pipeline ✅
 
-The CD pipeline is designed to deploy in three stages:
+The CD pipeline deploys in three stages:
 
 ```
   Deploy Infra          Deploy Functions        Smoke Test
-  (Bicep)        →      (func azure             →   (curl health
-                          publish)                    endpoint)
+  (Bicep)        →      (Azure Functions    →   (az CLI health
+                          Action v1)              checks)
 ```
 
 | Stage | What It Does |
 |-------|-------------|
 | **Deploy Infra** | `az deployment group create` with `infra/main.bicep` — creates/updates all Azure resources |
-| **Deploy Functions** | `func azure functionapp publish` — pushes the zipped function code to the Function App |
-| **Smoke Test** | Verifies the Function App is running and events are flowing into Event Hubs |
+| **Deploy Functions** | `Azure/functions-action@v1` with Oryx remote build — deploys the function code to the Function App |
+| **Smoke Test** | Verifies the Function App is running (`az functionapp show`), timer functions are registered (`az functionapp function list`), and events are flowing into Event Hubs (`az monitor metrics list`) |
 
 ---
 

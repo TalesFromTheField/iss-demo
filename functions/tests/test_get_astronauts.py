@@ -57,7 +57,7 @@ class TestGetAstronauts:
         get_astronauts(timer, output)
 
         mock_fetch.assert_called_once_with(
-            "http://api.open-notify.org/astros.json",
+            "https://api.open-notify.org/astros.json",
             timeout=10, retries=1, backoff=2,
         )
 

@@ -12,7 +12,7 @@ app = func.FunctionApp()
 
 logger = logging.getLogger(__name__)
 
-ISS_LOCATION_URL = "http://api.open-notify.org/iss-now.json"
+ISS_LOCATION_URL = "https://api.open-notify.org/iss-now.json"
 
 
 def _fetch_with_retry(url: str, timeout: int = 10, retries: int = 1, backoff: int = 2) -> requests.Response:
@@ -53,7 +53,9 @@ def _fetch_with_retry(url: str, timeout: int = 10, retries: int = 1, backoff: in
                 )
                 time.sleep(delay)
     # All attempts exhausted — re-raise the last exception
-    raise last_exception  # type: ignore[misc]
+    if last_exception is not None:
+        raise last_exception
+    raise requests.RequestException("All retry attempts failed with no exception captured")
 
 
 # ---------------------------------------------------------------------------
@@ -98,7 +100,7 @@ def get_iss_location(timer: func.TimerRequest, outputEvent: func.Out[str]) -> No
 # GetAstronauts — fires every minute
 # ---------------------------------------------------------------------------
 
-ASTRONAUTS_URL = "http://api.open-notify.org/astros.json"
+ASTRONAUTS_URL = "https://api.open-notify.org/astros.json"
 
 
 @app.timer_trigger(schedule="0 * * * * *", arg_name="timer", run_after_startup=False)

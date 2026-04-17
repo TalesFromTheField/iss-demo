@@ -22,13 +22,13 @@ GitHub Actions authenticates to Azure using OpenID Connect — no stored secrets
    - Navigate to Azure Portal → Entra ID → App registrations → New registration
    - Name it something memorable (e.g., `iss-demo-github-actions`)
 
-2. **Add a federated credential for GitHub Actions**
+2. **Add federated credentials for GitHub Actions**
    - In the App Registration → Certificates & secrets → Federated credentials → Add credential
    - Issuer: `https://token.actions.githubusercontent.com`
-   - Subject identifier: `repo:talesfromthefield/iss-demo:ref:refs/heads/main`
-   - Name: `github-actions-main`
+   - **Primary (required for CD):** Subject identifier: `repo:talesfromthefield/iss-demo:environment:dev` — Name: `github-actions-dev-env`
+   - **Optional (for CI on main):** Subject identifier: `repo:talesfromthefield/iss-demo:ref:refs/heads/main` — Name: `github-actions-main`
 
-   > 💡 **Tip:** If you also want CD from an environment, add a second credential with subject `repo:talesfromthefield/iss-demo:environment:dev`
+   > ⚠️ **Important:** The CD workflow uses `environment: dev`, so the `environment:dev` credential is **required**. The `ref:refs/heads/main` credential only matches jobs without an environment.
 
 3. **Note the following values** (you'll need them for GitHub secrets):
    - `CLIENT_ID` — from the App Registration overview
@@ -40,13 +40,15 @@ GitHub Actions authenticates to Azure using OpenID Connect — no stored secrets
    az group create -n rg-iss-demo-dev -l eastus2
    ```
 
-5. **Grant the app registration Contributor role on the resource group:**
+5. **Grant the app registration Owner role on the resource group:**
    ```bash
    az role assignment create \
      --assignee <CLIENT_ID> \
-     --role Contributor \
+     --role Owner \
      --scope /subscriptions/<SUBSCRIPTION_ID>/resourceGroups/rg-iss-demo-dev
    ```
+
+   > ⚠️ **Why Owner?** The Bicep deployment creates RBAC role assignments (Function App MI → Event Hubs Data Sender). The `Contributor` role cannot create role assignments — you need `Owner` or `Contributor` + `User Access Administrator`.
 
 ### GitHub Secrets
 
@@ -115,7 +117,7 @@ Astronauts
 3. Click **Refresh** to pull live data
 4. Configure auto-refresh:
    - Page settings → Page refresh → **Every 5 seconds**
-   - *(Requires DirectQuery or a Fabric capacity that supports auto page refresh)*
+   - *(Requires DirectQuery mode or a Fabric capacity that supports auto page refresh at this interval)*
 5. **Publish** to your Fabric workspace
 
 ✅ **Checkpoint:** Live ISS position updating on the map! 🗺️

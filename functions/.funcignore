@@ -1,0 +1,17 @@
+# Azure Functions deployment exclusions
+# Keeps the deployment zip lean by excluding non-function files.
+
+# Test suite
+tests/
+
+# Python artifacts
+__pycache__/
+.venv/
+*.pyc
+
+# Local dev config
+local.settings.json
+
+# Editor/IDE
+.vscode/
+.editorconfig

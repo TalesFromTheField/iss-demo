@@ -131,11 +131,18 @@ iss-demo/
 │   ├── function_app.py        #   Timer-triggered ISS poller
 │   ├── requirements.txt       #   Python dependencies
 │   ├── host.json              #   Functions host config
-│   └── tests/                 #   Unit tests (pytest)
+│   └── tests/                 #   Unit & integration tests (pytest)
 ├── 📂 infra/                  # Infrastructure-as-Code
-│   └── modules/
-│       ├── event-hubs.bicep   #   Event Hubs namespace + hubs
-│       └── monitoring.bicep   #   App Insights + Log Analytics
+│   ├── main.bicep             #   Orchestrator — wires all modules
+│   ├── modules/
+│   │   ├── event-hubs.bicep   #   Event Hubs namespace + hubs
+│   │   ├── function-app.bicep #   Storage, Plan, Function App + MI
+│   │   ├── monitoring.bicep   #   App Insights + Log Analytics
+│   │   └── role-assignments.bicep # RBAC: MI → Event Hubs Data Sender
+│   └── parameters/
+│       └── dev.bicepparam     #   Dev environment parameters
+├── 📂 scripts/                # Automation scripts
+│   └── deploy-fabric.sh       #   Fabric CLI resource provisioning
 ├── 📂 kql/                    # Kusto queries
 │   └── ISS.kql                #   Ad-hoc ISS data analysis
 ├── 📂 PBI/                    # Power BI
@@ -143,8 +150,7 @@ iss-demo/
 ├── 📂 logicapps/              # Legacy Logic Apps flows (reference)
 ├── 📂 docs/                   # Documentation
 ├── 📂 images/                 # Diagrams, screenshots, logos
-├── 📂 .github/                # GitHub Actions & templates
-├── Makefile                   # Developer command interface
+├── 📂 .github/                # GitHub Actions CI/CD workflows
 ├── CHANGELOG.md               # Release history
 └── README.md                  # 👈 You are here!
 ```

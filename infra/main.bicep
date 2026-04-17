@@ -78,5 +78,5 @@ output eventHubNamespaceFqdn string = eventHubs.outputs.namespaceFqdn
 @description('Name of the deployed Function App.')
 output functionAppName string = functionApp.outputs.functionAppName
 
-@description('Application Insights connection string for diagnostics.')
-output appInsightsConnectionString string = monitoring.outputs.appInsightsConnectionString
+// App Insights connection string intentionally omitted from outputs
+// to avoid exposing sensitive values in ARM deployment history.
