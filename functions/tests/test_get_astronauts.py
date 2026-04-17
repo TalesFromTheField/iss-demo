@@ -3,7 +3,6 @@
 import json
 from unittest.mock import MagicMock, patch
 
-import pytest
 import requests as req
 
 from function_app import get_astronauts
