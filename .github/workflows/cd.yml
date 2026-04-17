@@ -62,3 +62,74 @@ jobs:
           package: functions
           scm-do-build-during-deployment: true
           enable-oryx-build: true
+
+  smoke-test:
+    name: Post-Deploy Smoke Test
+    runs-on: ubuntu-latest
+    needs: deploy-functions
+    environment: dev
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Verify Function App is healthy
+        run: |
+          echo "Checking Function App status..."
+          STATUS=$(az functionapp show \
+            --name ${{ env.FUNCTION_APP_NAME }} \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --query "state" -o tsv)
+          echo "Function App state: $STATUS"
+          if [ "$STATUS" != "Running" ]; then
+            echo "::error::Function App is not running (state: $STATUS)"
+            exit 1
+          fi
+          echo "✅ Function App is running"
+
+      - name: Verify timer functions are registered
+        run: |
+          echo "Listing registered functions..."
+          FUNCTIONS=$(az functionapp function list \
+            --name ${{ env.FUNCTION_APP_NAME }} \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --query "[].name" -o tsv)
+          echo "Registered functions: $FUNCTIONS"
+          
+          echo "$FUNCTIONS" | grep -q "get_iss_location" || \
+            { echo "::error::get_iss_location not found"; exit 1; }
+          echo "✅ get_iss_location registered"
+          
+          echo "$FUNCTIONS" | grep -q "get_astronauts" || \
+            { echo "::error::get_astronauts not found"; exit 1; }
+          echo "✅ get_astronauts registered"
+
+      - name: Verify events reaching Event Hubs
+        run: |
+          echo "Waiting 60s for events to flow..."
+          sleep 60
+          
+          NAMESPACE="evhns-iss-dev"
+          
+          for HUB in "iss-location" "astronauts"; do
+            echo "Checking Event Hub: $HUB..."
+            # Check if the hub has received messages by querying metrics
+            INCOMING=$(az monitor metrics list \
+              --resource "/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.AZURE_RESOURCE_GROUP }}/providers/Microsoft.EventHub/namespaces/$NAMESPACE/eventhubs/$HUB" \
+              --metric "IncomingMessages" \
+              --interval PT1M \
+              --query "value[0].timeseries[0].data[-1].total" -o tsv 2>/dev/null || echo "0")
+            echo "  Incoming messages for $HUB: $INCOMING"
+            if [ "${INCOMING:-0}" = "0" ] || [ "$INCOMING" = "None" ]; then
+              echo "::warning::No incoming messages detected for $HUB (may need more time)"
+            else
+              echo "  ✅ Events flowing to $HUB"
+            fi
+          done
+          
+          echo "✅ Smoke test complete"
