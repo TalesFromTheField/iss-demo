@@ -1,0 +1,202 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.42.1.51946",
+      "templateHash": "5423335865516015300"
+    }
+  },
+  "parameters": {
+    "environmentName": {
+      "type": "string",
+      "metadata": {
+        "description": "Environment name used for resource naming (e.g. dev, staging, prod)."
+      }
+    },
+    "location": {
+      "type": "string",
+      "metadata": {
+        "description": "Azure region for all resources in this module."
+      }
+    },
+    "functionAppName": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Name of the Function App (informational; used in alert display names)."
+      }
+    },
+    "functionAppResourceId": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Resource ID of the Function App to scope metric alerts against. When empty, alert rules are not deployed."
+      }
+    }
+  },
+  "variables": {
+    "logAnalyticsName": "[format('law-iss-{0}', parameters('environmentName'))]",
+    "appInsightsName": "[format('appi-iss-{0}', parameters('environmentName'))]",
+    "alertsEnabled": "[not(empty(parameters('functionAppResourceId')))]"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.OperationalInsights/workspaces",
+      "apiVersion": "2023-09-01",
+      "name": "[variables('logAnalyticsName')]",
+      "location": "[parameters('location')]",
+      "properties": {
+        "sku": {
+          "name": "PerGB2018"
+        },
+        "retentionInDays": 30,
+        "features": {
+          "enableLogAccessUsingOnlyResourcePermissions": true
+        },
+        "publicNetworkAccessForIngestion": "Enabled",
+        "publicNetworkAccessForQuery": "Enabled"
+      },
+      "metadata": {
+        "description": "Log Analytics Workspace that backs Application Insights."
+      }
+    },
+    {
+      "type": "Microsoft.Insights/components",
+      "apiVersion": "2020-02-02",
+      "name": "[variables('appInsightsName')]",
+      "location": "[parameters('location')]",
+      "kind": "web",
+      "properties": {
+        "Application_Type": "web",
+        "WorkspaceResourceId": "[resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsName'))]",
+        "RetentionInDays": 30,
+        "IngestionMode": "LogAnalytics",
+        "publicNetworkAccessForIngestion": "Enabled",
+        "publicNetworkAccessForQuery": "Enabled"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsName'))]"
+      ],
+      "metadata": {
+        "description": "Application Insights instance connected to the Log Analytics Workspace."
+      }
+    },
+    {
+      "condition": "[variables('alertsEnabled')]",
+      "type": "Microsoft.Insights/metricAlerts",
+      "apiVersion": "2018-03-01",
+      "name": "[format('alert-func-failures-{0}', parameters('environmentName'))]",
+      "location": "global",
+      "properties": {
+        "description": "[format('Function execution failures exceeded threshold (>5 in 5 min) for {0}.', if(not(empty(parameters('functionAppName'))), parameters('functionAppName'), 'Function App'))]",
+        "severity": 2,
+        "enabled": true,
+        "evaluationFrequency": "PT1M",
+        "windowSize": "PT5M",
+        "scopes": [
+          "[parameters('functionAppResourceId')]"
+        ],
+        "criteria": {
+          "odata.type": "Microsoft.Azure.Monitor.SingleResourceMultipleMetricCriteria",
+          "allOf": [
+            {
+              "name": "FunctionExecutionFailures",
+              "metricName": "FunctionExecutionCount",
+              "metricNamespace": "Microsoft.Web/sites",
+              "operator": "GreaterThan",
+              "threshold": 5,
+              "timeAggregation": "Total",
+              "dimensions": [
+                {
+                  "name": "FunctionExecutionStatus",
+                  "operator": "Include",
+                  "values": [
+                    "Failed"
+                  ]
+                }
+              ],
+              "criterionType": "StaticThresholdCriterion"
+            }
+          ]
+        },
+        "autoMitigate": true,
+        "targetResourceType": "Microsoft.Web/sites",
+        "targetResourceRegion": "[parameters('location')]"
+      },
+      "metadata": {
+        "description": "Fires when Function App execution failures exceed 5 within a 5-minute window."
+      }
+    },
+    {
+      "condition": "[variables('alertsEnabled')]",
+      "type": "Microsoft.Insights/metricAlerts",
+      "apiVersion": "2018-03-01",
+      "name": "[format('alert-func-stopped-{0}', parameters('environmentName'))]",
+      "location": "global",
+      "properties": {
+        "description": "[format('No successful function executions detected in the last 10 minutes for {0}. The Function App may have stopped.', if(not(empty(parameters('functionAppName'))), parameters('functionAppName'), 'Function App'))]",
+        "severity": 1,
+        "enabled": true,
+        "evaluationFrequency": "PT5M",
+        "windowSize": "PT10M",
+        "scopes": [
+          "[parameters('functionAppResourceId')]"
+        ],
+        "criteria": {
+          "odata.type": "Microsoft.Azure.Monitor.SingleResourceMultipleMetricCriteria",
+          "allOf": [
+            {
+              "name": "ZeroSuccessfulExecutions",
+              "metricName": "FunctionExecutionCount",
+              "metricNamespace": "Microsoft.Web/sites",
+              "operator": "LessThanOrEqual",
+              "threshold": 0,
+              "timeAggregation": "Total",
+              "dimensions": [
+                {
+                  "name": "FunctionExecutionStatus",
+                  "operator": "Include",
+                  "values": [
+                    "Completed"
+                  ]
+                }
+              ],
+              "criterionType": "StaticThresholdCriterion"
+            }
+          ]
+        },
+        "autoMitigate": true,
+        "targetResourceType": "Microsoft.Web/sites",
+        "targetResourceRegion": "[parameters('location')]"
+      },
+      "metadata": {
+        "description": "Fires when there are zero successful Function executions over a 10-minute window, indicating the Function App may have stopped."
+      }
+    }
+  ],
+  "outputs": {
+    "appInsightsConnectionString": {
+      "type": "string",
+      "metadata": {
+        "description": "Application Insights connection string for the Function App configuration."
+      },
+      "value": "[reference(resourceId('Microsoft.Insights/components', variables('appInsightsName')), '2020-02-02').ConnectionString]"
+    },
+    "appInsightsInstrumentationKey": {
+      "type": "string",
+      "metadata": {
+        "description": "Application Insights instrumentation key (legacy; prefer connection string)."
+      },
+      "value": "[reference(resourceId('Microsoft.Insights/components', variables('appInsightsName')), '2020-02-02').InstrumentationKey]"
+    },
+    "logAnalyticsWorkspaceId": {
+      "type": "string",
+      "metadata": {
+        "description": "Resource ID of the Log Analytics Workspace."
+      },
+      "value": "[resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsName'))]"
+    }
+  }
+}

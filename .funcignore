@@ -1,0 +1,38 @@
+# Azure Functions deployment exclusions
+# Keeps the deployment zip lean by excluding non-function files.
+
+# Test suite
+tests/
+
+# Documentation and static assets
+docs/
+images/
+*.md
+
+# Non-function project directories
+logicapps/
+PBI/
+kql/
+infra/
+
+# CI/CD and tooling
+.github/
+.teamwork/
+
+# Git
+.git/
+.gitignore
+
+# Editor and IDE
+.vscode/
+.editorconfig
+
+# Python artifacts
+__pycache__
+.venv/
+
+# Local and deployment config
+local.settings.json
+.funcignore
+.pre-commit-config.yaml
+Makefile
