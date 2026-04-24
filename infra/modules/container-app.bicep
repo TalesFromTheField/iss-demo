@@ -21,18 +21,24 @@ param issLocationHubName string = 'iss-location'
 @description('Name of the astronauts Event Hub.')
 param astronautsHubName string = 'astronauts'
 
+@description('Name of the Event Hubs namespace used for fallback connection-string lookup.')
+param eventHubNamespaceName string
+
 @description('Container image URI (e.g., acrissdev.azurecr.io/iss-demo:latest).')
 param containerImageUri string
 
 @description('Event Hubs namespace connection string (for event publishing).')
 @secure()
-param eventHubConnectionString string
+param eventHubConnectionString string = ''
 
 // ── Variables ───────────────────────────────────────────────────────────────
 
 var containerAppEnvName = 'cae-iss-${environmentName}'
 var containerAppName = 'ca-iss-${environmentName}'
 var logAnalyticsWorkspaceName = 'law-iss-${environmentName}'
+var effectiveEventHubConnectionString = !empty(eventHubConnectionString)
+  ? eventHubConnectionString
+  : listKeys(resourceId('Microsoft.EventHub/namespaces/authorizationRules', eventHubNamespaceName, 'RootManageSharedAccessKey'), '2024-01-01').primaryConnectionString
 
 // ── Outputs (for querying Log Analytics) ────────────────────────────────────
 
@@ -84,7 +90,7 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
           env: [
             {
               name: 'EventHubConnection'
-              value: eventHubConnectionString
+              value: effectiveEventHubConnectionString
             }
             {
               name: 'IssLocationHubName'

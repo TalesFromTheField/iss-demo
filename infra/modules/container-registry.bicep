@@ -13,8 +13,10 @@ param location string
 
 // ── Variables ───────────────────────────────────────────────────────────────
 
-// ACR names must be 5-50 characters, lowercase alphanumeric only (no hyphens).
-var acrName = 'acriss${environmentName}'
+// ACR names must be 5-50 chars, lowercase alphanumeric only, and globally unique.
+var envToken = toLower(replace(replace(replace(environmentName, '-', ''), '_', ''), '.', ''))
+var uniqueSuffix = take(uniqueString(subscription().id, resourceGroup().id, environmentName), 6)
+var acrName = take('acriss${envToken}${uniqueSuffix}', 50)
 
 // ── Container Registry ──────────────────────────────────────────────────────
 

@@ -12,7 +12,8 @@ param location string
 // Event Hubs Namespace (Standard tier — required for Fabric EventStream)
 // ---------------------------------------------------------------------------
 
-var namespaceName = 'evhns-iss-${environmentName}'
+var envToken = toLower(replace(replace(replace(environmentName, '-', ''), '_', ''), '.', ''))
+var namespaceName = take('evhnsiss${envToken}', 50)
 
 resource namespace 'Microsoft.EventHub/namespaces@2024-01-01' = {
   name: namespaceName

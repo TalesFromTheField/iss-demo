@@ -58,11 +58,7 @@ var effectiveImageUri = !empty(containerImageUri)
   : 'ghcr.io/talesfromthefield/iss-demo:latest'
 
 // Event Hubs namespace name is deterministic from environmentName in event-hubs module.
-var eventHubNamespaceName = 'evhns-iss-${environmentName}'
-
-var effectiveEventHubConnectionString = !empty(eventHubConnectionString)
-  ? eventHubConnectionString
-  : listKeys(resourceId('Microsoft.EventHub/namespaces/authorizationRules', eventHubNamespaceName, 'RootManageSharedAccessKey'), '2024-01-01').primaryConnectionString
+var eventHubNamespaceName = eventHubs.outputs.namespaceName
 
 module containerApp 'modules/container-app.bicep' = {
   name: 'container-app'
@@ -72,8 +68,9 @@ module containerApp 'modules/container-app.bicep' = {
     appInsightsConnectionString: monitoring.outputs.appInsightsConnectionString
     issLocationHubName: eventHubs.outputs.issLocationHubName
     astronautsHubName: eventHubs.outputs.astronautsHubName
+    eventHubNamespaceName: eventHubNamespaceName
     containerImageUri: effectiveImageUri
-    eventHubConnectionString: effectiveEventHubConnectionString
+    eventHubConnectionString: eventHubConnectionString
   }
 }
 

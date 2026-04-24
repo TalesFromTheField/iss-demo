@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.42.1.51946",
-      "templateHash": "7693886918295530034"
+      "templateHash": "5729198988749554837"
     }
   },
   "parameters": {
@@ -38,8 +38,7 @@
     }
   },
   "variables": {
-    "effectiveImageUri": "[if(not(empty(parameters('containerImageUri'))), parameters('containerImageUri'), 'ghcr.io/talesfromthefield/iss-demo:latest')]",
-    "eventHubNamespaceName": "[format('evhns-iss-{0}', parameters('environmentName'))]"
+    "effectiveImageUri": "[if(not(empty(parameters('containerImageUri'))), parameters('containerImageUri'), 'ghcr.io/talesfromthefield/iss-demo:latest')]"
   },
   "resources": [
     {
@@ -66,7 +65,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.42.1.51946",
-              "templateHash": "15415373373505047079"
+              "templateHash": "18330707068297602237"
             }
           },
           "parameters": {
@@ -84,7 +83,8 @@
             }
           },
           "variables": {
-            "namespaceName": "[format('evhns-iss-{0}', parameters('environmentName'))]"
+            "envToken": "[toLower(replace(replace(replace(parameters('environmentName'), '-', ''), '_', ''), '.', ''))]",
+            "namespaceName": "[take(format('evhnsiss{0}', variables('envToken')), 50)]"
           },
           "resources": [
             {
@@ -439,7 +439,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.42.1.51946",
-              "templateHash": "1504319138836839525"
+              "templateHash": "4764341005766993572"
             }
           },
           "parameters": {
@@ -457,7 +457,9 @@
             }
           },
           "variables": {
-            "acrName": "[format('acriss{0}', parameters('environmentName'))]"
+            "envToken": "[toLower(replace(replace(replace(parameters('environmentName'), '-', ''), '_', ''), '.', ''))]",
+            "uniqueSuffix": "[take(uniqueString(subscription().id, resourceGroup().id, parameters('environmentName')), 6)]",
+            "acrName": "[take(format('acriss{0}{1}', variables('envToken'), variables('uniqueSuffix')), 50)]"
           },
           "resources": [
             {
@@ -529,10 +531,15 @@
           "astronautsHubName": {
             "value": "[reference(resourceId('Microsoft.Resources/deployments', 'event-hubs'), '2025-04-01').outputs.astronautsHubName.value]"
           },
+          "eventHubNamespaceName": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'event-hubs'), '2025-04-01').outputs.namespaceName.value]"
+          },
           "containerImageUri": {
             "value": "[variables('effectiveImageUri')]"
           },
-          "eventHubConnectionString": "[if(not(empty(parameters('eventHubConnectionString'))), createObject('value', parameters('eventHubConnectionString')), createObject('value', listKeys(resourceId('Microsoft.EventHub/namespaces/authorizationRules', variables('eventHubNamespaceName'), 'RootManageSharedAccessKey'), '2024-01-01').primaryConnectionString))]"
+          "eventHubConnectionString": {
+            "value": "[parameters('eventHubConnectionString')]"
+          }
         },
         "template": {
           "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
@@ -541,7 +548,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.42.1.51946",
-              "templateHash": "3633955337297777757"
+              "templateHash": "7420840894161871663"
             }
           },
           "parameters": {
@@ -577,6 +584,12 @@
                 "description": "Name of the astronauts Event Hub."
               }
             },
+            "eventHubNamespaceName": {
+              "type": "string",
+              "metadata": {
+                "description": "Name of the Event Hubs namespace used for fallback connection-string lookup."
+              }
+            },
             "containerImageUri": {
               "type": "string",
               "metadata": {
@@ -585,6 +598,7 @@
             },
             "eventHubConnectionString": {
               "type": "securestring",
+              "defaultValue": "",
               "metadata": {
                 "description": "Event Hubs namespace connection string (for event publishing)."
               }
@@ -633,7 +647,7 @@
                       "env": [
                         {
                           "name": "EventHubConnection",
-                          "value": "[parameters('eventHubConnectionString')]"
+                          "value": "[if(not(empty(parameters('eventHubConnectionString'))), parameters('eventHubConnectionString'), listKeys(resourceId('Microsoft.EventHub/namespaces/authorizationRules', parameters('eventHubNamespaceName'), 'RootManageSharedAccessKey'), '2024-01-01').primaryConnectionString)]"
                         },
                         {
                           "name": "IssLocationHubName",
@@ -719,10 +733,10 @@
             "value": "[reference(resourceId('Microsoft.Resources/deployments', 'container-app'), '2025-04-01').outputs.containerAppPrincipalId.value]"
           },
           "eventHubNamespaceResourceId": {
-            "value": "[resourceId('Microsoft.EventHub/namespaces', variables('eventHubNamespaceName'))]"
+            "value": "[resourceId('Microsoft.EventHub/namespaces', reference(resourceId('Microsoft.Resources/deployments', 'event-hubs'), '2025-04-01').outputs.namespaceName.value)]"
           },
           "eventHubNamespaceName": {
-            "value": "[variables('eventHubNamespaceName')]"
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'event-hubs'), '2025-04-01').outputs.namespaceName.value]"
           },
           "acrResourceId": {
             "value": "[reference(resourceId('Microsoft.Resources/deployments', 'container-registry'), '2025-04-01').outputs.registryResourceId.value]"
@@ -820,7 +834,8 @@
       },
       "dependsOn": [
         "[resourceId('Microsoft.Resources/deployments', 'container-app')]",
-        "[resourceId('Microsoft.Resources/deployments', 'container-registry')]"
+        "[resourceId('Microsoft.Resources/deployments', 'container-registry')]",
+        "[resourceId('Microsoft.Resources/deployments', 'event-hubs')]"
       ]
     }
   ],
