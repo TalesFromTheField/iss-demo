@@ -16,16 +16,6 @@ param location string = resourceGroup().location
 @description('Container image URI (e.g., acrissdev.azurecr.io/iss-demo:latest or docker.io/org/iss-demo:latest).')
 param containerImageUri string = ''
 
-@description('Azure Container Registry login server (only required if using private ACR).')
-param acrLoginServer string = ''
-
-@description('Azure Container Registry admin username (only required if using private ACR).')
-param acrAdminUsername string = ''
-
-@description('Azure Container Registry admin password (only required if using private ACR).')
-@secure()
-param acrAdminPassword string = ''
-
 @description('Event Hubs connection string (for container app environment).')
 @secure()
 param eventHubConnectionString string = ''
@@ -67,10 +57,6 @@ var effectiveImageUri = !empty(containerImageUri)
   ? containerImageUri 
   : '${containerRegistry.outputs.loginServer}/iss-demo:latest'
 
-var effectiveAcrLoginServer = !empty(acrLoginServer) ? acrLoginServer : containerRegistry.outputs.loginServer
-var effectiveAcrAdminUsername = !empty(acrAdminUsername) ? acrAdminUsername : 'admin'
-var effectiveAcrAdminPassword = !empty(acrAdminPassword) ? acrAdminPassword : ''
-
 // For Event Hub connection string, retrieve it from the Event Hubs namespace if not provided
 module eventHubsConnStr 'modules/get-eventhub-connstr.bicep' = if (empty(eventHubConnectionString)) {
   name: 'get-eventhub-connstr'
@@ -89,27 +75,11 @@ module containerApp 'modules/container-app.bicep' = {
   params: {
     environmentName: environmentName
     location: location
-    eventHubNamespaceFqdn: eventHubs.outputs.namespaceFqdn
     appInsightsConnectionString: monitoring.outputs.appInsightsConnectionString
     issLocationHubName: eventHubs.outputs.issLocationHubName
     astronautsHubName: eventHubs.outputs.astronautsHubName
     containerImageUri: effectiveImageUri
-    acrLoginServer: effectiveAcrLoginServer
-    acrAdminUsername: effectiveAcrAdminUsername
-    acrAdminPassword: effectiveAcrAdminPassword
     eventHubConnectionString: effectiveEventHubConnectionString
-  }
-}
-
-// ── Module: Monitoring Alerts (re-deploy with Container App info) ──────────
-
-module monitoringAlerts 'modules/monitoring.bicep' = {
-  name: 'monitoring-alerts'
-  params: {
-    environmentName: environmentName
-    location: location
-    containerAppName: containerApp.outputs.containerAppName
-    containerAppResourceId: containerApp.outputs.containerAppResourceId
   }
 }
 
@@ -121,6 +91,7 @@ module roleAssignments 'modules/role-assignments.bicep' = {
     principalId: containerApp.outputs.containerAppPrincipalId
     eventHubNamespaceResourceId: resourceId('Microsoft.EventHub/namespaces', eventHubs.outputs.namespaceName)
     eventHubNamespaceName: eventHubs.outputs.namespaceName
+    acrResourceId: containerRegistry.outputs.registryResourceId
   }
 }
 

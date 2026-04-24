@@ -12,9 +12,6 @@ param environmentName string
 @description('Azure region for all resources.')
 param location string
 
-@description('Fully qualified domain name of the Event Hubs namespace.')
-param eventHubNamespaceFqdn string
-
 @description('Application Insights connection string for telemetry.')
 param appInsightsConnectionString string
 
@@ -26,17 +23,6 @@ param astronautsHubName string = 'astronauts'
 
 @description('Container image URI (e.g., acrissdev.azurecr.io/iss-demo:latest).')
 param containerImageUri string
-
-@description('Azure Container Registry login server (for pull credentials).')
-param acrLoginServer string
-
-@description('Azure Container Registry admin username.')
-@secure()
-param acrAdminUsername string
-
-@description('Azure Container Registry admin password.')
-@secure()
-param acrAdminPassword string
 
 @description('Event Hubs namespace connection string (for event publishing).')
 @secure()
@@ -87,24 +73,8 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
   properties: {
     environmentId: containerAppEnvironment.id
     configuration: {
-      ingress: {
-        external: false
-        targetPort: 8080
-        allowInsecure: false
-      }
-      registries: [
-        {
-          server: acrLoginServer
-          username: acrAdminUsername
-          passwordSecretRef: 'acr-password'
-        }
-      ]
-      secrets: [
-        {
-          name: 'acr-password'
-          value: acrAdminPassword
-        }
-      ]
+      // No explicit registry credentials needed — container app uses managed identity for ACR pulls
+      // (requires AcrPull role assignment via RBAC in role-assignments module)
     }
     template: {
       containers: [
@@ -114,7 +84,7 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
           env: [
             {
               name: 'EventHubConnection'
-              secureValue: eventHubConnectionString
+              value: eventHubConnectionString
             }
             {
               name: 'IssLocationHubName'
@@ -126,7 +96,7 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
             }
             {
               name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
-              secureValue: appInsightsConnectionString
+              value: appInsightsConnectionString
             }
           ]
           resources: {
