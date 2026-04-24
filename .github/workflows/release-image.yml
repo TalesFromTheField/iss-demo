@@ -51,16 +51,30 @@ jobs:
             type=sha,prefix={{branch}}-
             type=raw,value=latest,enable={{is_default_branch}}
 
+      - name: Build tags
+        id: tags
+        run: |
+          TAGS="${{ env.IMAGE_REGISTRY }}/${{ steps.repo.outputs.name }}:latest"
+          TAGS="${TAGS}
+          ${{ env.IMAGE_REGISTRY }}/${{ steps.repo.outputs.name }}:${{ github.sha }}"
+          
+          # Only add release tag if this is triggered by a release event
+          if [ "${{ github.event_name }}" = "release" ]; then
+            TAGS="${TAGS}
+          ${{ env.IMAGE_REGISTRY }}/${{ steps.repo.outputs.name }}:${{ github.event.release.tag_name }}"
+          fi
+          
+          echo "tags<<EOF" >> $GITHUB_OUTPUT
+          echo "$TAGS" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
       - name: Build and push
         id: build
         uses: docker/build-push-action@v5
         with:
           context: .
           push: true
-          tags: |
-            ${{ env.IMAGE_REGISTRY }}/${{ steps.repo.outputs.name }}:latest
-            ${{ env.IMAGE_REGISTRY }}/${{ steps.repo.outputs.name }}:${{ github.event.release.tag_name }}
-            ${{ env.IMAGE_REGISTRY }}/${{ steps.repo.outputs.name }}:${{ github.sha }}
+          tags: ${{ steps.tags.outputs.tags }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
@@ -71,4 +85,6 @@ jobs:
         run: |
           echo "uri=${{ env.IMAGE_REGISTRY }}/${{ steps.repo.outputs.name }}:latest" >> $GITHUB_OUTPUT
           echo "Built and pushed: ${{ env.IMAGE_REGISTRY }}/${{ steps.repo.outputs.name }}:latest"
-          echo "Also tagged with: ${{ github.event.release.tag_name }}"
+          if [ "${{ github.event_name }}" = "release" ]; then
+            echo "Also tagged with: ${{ github.event.release.tag_name }}"
+          fi
