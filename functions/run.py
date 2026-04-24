@@ -7,11 +7,13 @@ This enables the same function code to run in a Container App environment.
 import json
 import logging
 import os
+import signal
 import sys
+import time
 from datetime import datetime, timezone
 
 from apscheduler.schedulers.background import BackgroundScheduler
-from azure.eventhub import EventHubProducerClient
+from azure.eventhub import EventData, EventHubProducerClient
 from function_app import (
     ISS_LOCATION_URL,
     ASTRONAUTS_URL,
@@ -41,7 +43,7 @@ def send_to_event_hub(connection_string: str, hub_name: str, message: str) -> No
     )
     with producer:
         batch = producer.create_batch()
-        batch.add({"body": message})
+        batch.add(EventData(message))
         producer.send_batch(batch)
 
 
@@ -111,13 +113,22 @@ def main() -> None:
     scheduler.start()
     logger.info("Scheduler started. Jobs running...")
 
+    def signal_handler(signum: int, frame) -> None:
+        """Handle SIGTERM and SIGINT gracefully."""
+        logger.info("Scheduler shutdown requested (signal %s).", signum)
+        scheduler.shutdown()
+        sys.exit(0)
+
+    # Register signal handlers for graceful shutdown in Container Apps
+    signal.signal(signal.SIGTERM, signal_handler)
+    signal.signal(signal.SIGINT, signal_handler)
+
     try:
         # Keep the main thread alive
         while True:
-            import time
             time.sleep(1)
     except KeyboardInterrupt:
-        logger.info("Scheduler shutdown requested.")
+        logger.info("Scheduler shutdown requested (KeyboardInterrupt).")
         scheduler.shutdown()
         sys.exit(0)
 

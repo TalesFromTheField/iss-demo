@@ -15,6 +15,7 @@ param resourceGroupName string
 
 resource eventHubNamespace 'Microsoft.EventHub/namespaces@2024-01-01' existing = {
   name: eventHubNamespaceName
+  scope: resourceGroup(resourceGroupName)
 }
 
 // ── Retrieve Connection String ──────────────────────────────────────────────
