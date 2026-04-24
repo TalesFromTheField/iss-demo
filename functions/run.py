@@ -13,6 +13,7 @@ import time
 from datetime import datetime, timezone
 
 from apscheduler.schedulers.background import BackgroundScheduler
+from azure.identity import DefaultAzureCredential
 from azure.eventhub import EventData, EventHubProducerClient
 from function_app import (
     ISS_LOCATION_URL,
@@ -28,19 +29,30 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Environment configuration
+EVENT_HUB_NAMESPACE_FQDN = os.environ.get("EventHubNamespaceFqdn")
 EVENT_HUB_CONNECTION_STRING = os.environ.get("EventHubConnection")
 ISS_LOCATION_HUB_NAME = os.environ.get("IssLocationHubName", "iss-location")
 ASTRONAUTS_HUB_NAME = os.environ.get("AstronautsHubName", "astronauts")
 
-if not EVENT_HUB_CONNECTION_STRING:
-    raise RuntimeError("EventHubConnection environment variable not set")
-
-
-def send_to_event_hub(connection_string: str, hub_name: str, message: str) -> None:
+def send_to_event_hub(hub_name: str, message: str) -> None:
     """Send a message to an Event Hub."""
-    producer = EventHubProducerClient.from_connection_string(
-        connection_string, eventhub_name=hub_name
-    )
+    if EVENT_HUB_NAMESPACE_FQDN:
+        credential = DefaultAzureCredential(exclude_interactive_browser_credential=True)
+        producer = EventHubProducerClient(
+            fully_qualified_namespace=EVENT_HUB_NAMESPACE_FQDN,
+            eventhub_name=hub_name,
+            credential=credential,
+        )
+    elif EVENT_HUB_CONNECTION_STRING:
+        producer = EventHubProducerClient.from_connection_string(
+            EVENT_HUB_CONNECTION_STRING,
+            eventhub_name=hub_name,
+        )
+    else:
+        raise RuntimeError(
+            "Missing Event Hub configuration. Set EventHubNamespaceFqdn for managed identity auth."
+        )
+
     with producer:
         batch = producer.create_batch()
         batch.add(EventData(message))
@@ -60,11 +72,7 @@ def job_get_iss_location() -> None:
             "data": iss_data,
         }
 
-        send_to_event_hub(
-            EVENT_HUB_CONNECTION_STRING,
-            ISS_LOCATION_HUB_NAME,
-            json.dumps(event),
-        )
+        send_to_event_hub(ISS_LOCATION_HUB_NAME, json.dumps(event))
         logger.info(
             "ISS location event sent: lat=%s, lon=%s",
             iss_data.get("iss_position", {}).get("latitude", "?"),
@@ -87,11 +95,7 @@ def job_get_astronauts() -> None:
             "data": astro_data,
         }
 
-        send_to_event_hub(
-            EVENT_HUB_CONNECTION_STRING,
-            ASTRONAUTS_HUB_NAME,
-            json.dumps(event),
-        )
+        send_to_event_hub(ASTRONAUTS_HUB_NAME, json.dumps(event))
         logger.info("Astronauts event sent: %d people in space", astro_data.get("number", 0))
     except Exception as exc:
         logger.error("Error in job_get_astronauts: %s", exc, exc_info=True)

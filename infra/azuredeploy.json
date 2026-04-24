@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.42.1.51946",
-      "templateHash": "1857165299377172824"
+      "templateHash": "3367856081488671867"
     }
   },
   "parameters": {
@@ -27,13 +27,6 @@
       "defaultValue": "",
       "metadata": {
         "description": "Optional container image URI override. Leave blank to deploy ghcr.io/talesfromthefield/iss-demo:latest."
-      }
-    },
-    "eventHubConnectionString": {
-      "type": "securestring",
-      "defaultValue": "",
-      "metadata": {
-        "description": "Optional Event Hubs connection string override for the container app. Leave blank to use the connection string from the Event Hubs namespace deployed by this template."
       }
     }
   },
@@ -538,9 +531,6 @@
           },
           "containerImageUri": {
             "value": "[variables('effectiveImageUri')]"
-          },
-          "eventHubConnectionString": {
-            "value": "[parameters('eventHubConnectionString')]"
           }
         },
         "template": {
@@ -550,7 +540,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.42.1.51946",
-              "templateHash": "10390013278317053308"
+              "templateHash": "6520262135877380816"
             }
           },
           "parameters": {
@@ -597,20 +587,14 @@
               "metadata": {
                 "description": "Container image URI (e.g., acrissdev.azurecr.io/iss-demo:latest)."
               }
-            },
-            "eventHubConnectionString": {
-              "type": "securestring",
-              "defaultValue": "",
-              "metadata": {
-                "description": "Event Hubs namespace connection string (for event publishing)."
-              }
             }
           },
           "variables": {
             "normalizedEnvironmentName": "[toLower(replace(replace(replace(parameters('environmentName'), ' ', '-'), '_', '-'), '.', '-'))]",
             "containerAppEnvName": "[format('cae-iss-{0}', variables('normalizedEnvironmentName'))]",
             "containerAppName": "[format('ca-iss-{0}', variables('normalizedEnvironmentName'))]",
-            "logAnalyticsWorkspaceName": "[format('law-iss-{0}', variables('normalizedEnvironmentName'))]"
+            "logAnalyticsWorkspaceName": "[format('law-iss-{0}', variables('normalizedEnvironmentName'))]",
+            "eventHubNamespaceFqdn": "[format('{0}.servicebus.windows.net', parameters('eventHubNamespaceName'))]"
           },
           "resources": [
             {
@@ -649,8 +633,8 @@
                       "name": "iss-demo-scheduler",
                       "env": [
                         {
-                          "name": "EventHubConnection",
-                          "value": "[if(not(empty(parameters('eventHubConnectionString'))), parameters('eventHubConnectionString'), listKeys(resourceId('Microsoft.EventHub/namespaces/authorizationRules', parameters('eventHubNamespaceName'), 'RootManageSharedAccessKey'), '2024-01-01').primaryConnectionString)]"
+                          "name": "EventHubNamespaceFqdn",
+                          "value": "[variables('eventHubNamespaceFqdn')]"
                         },
                         {
                           "name": "IssLocationHubName",

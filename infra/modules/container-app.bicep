@@ -27,19 +27,13 @@ param eventHubNamespaceName string
 @description('Container image URI (e.g., acrissdev.azurecr.io/iss-demo:latest).')
 param containerImageUri string
 
-@description('Event Hubs namespace connection string (for event publishing).')
-@secure()
-param eventHubConnectionString string = ''
-
 // ── Variables ───────────────────────────────────────────────────────────────
 
 var normalizedEnvironmentName = toLower(replace(replace(replace(environmentName, ' ', '-'), '_', '-'), '.', '-'))
 var containerAppEnvName = 'cae-iss-${normalizedEnvironmentName}'
 var containerAppName = 'ca-iss-${normalizedEnvironmentName}'
 var logAnalyticsWorkspaceName = 'law-iss-${normalizedEnvironmentName}'
-var effectiveEventHubConnectionString = !empty(eventHubConnectionString)
-  ? eventHubConnectionString
-  : listKeys(resourceId('Microsoft.EventHub/namespaces/authorizationRules', eventHubNamespaceName, 'RootManageSharedAccessKey'), '2024-01-01').primaryConnectionString
+var eventHubNamespaceFqdn = '${eventHubNamespaceName}.servicebus.windows.net'
 
 // ── Outputs (for querying Log Analytics) ────────────────────────────────────
 
@@ -90,8 +84,8 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
           name: 'iss-demo-scheduler'
           env: [
             {
-              name: 'EventHubConnection'
-              value: effectiveEventHubConnectionString
+              name: 'EventHubNamespaceFqdn'
+              value: eventHubNamespaceFqdn
             }
             {
               name: 'IssLocationHubName'

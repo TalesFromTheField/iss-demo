@@ -16,10 +16,6 @@ param location string = resourceGroup().location
 @description('Optional container image URI override. Leave blank to deploy ghcr.io/talesfromthefield/iss-demo:latest.')
 param containerImageUri string = ''
 
-@description('Optional Event Hubs connection string override for the container app. Leave blank to use the connection string from the Event Hubs namespace deployed by this template.')
-@secure()
-param eventHubConnectionString string = ''
-
 // Normalize user-provided environment names for resource naming safety.
 var normalizedEnvironmentName = toLower(replace(replace(replace(environmentName, ' ', '-'), '_', '-'), '.', '-'))
 
@@ -73,7 +69,6 @@ module containerApp 'modules/container-app.bicep' = {
     astronautsHubName: eventHubs.outputs.astronautsHubName
     eventHubNamespaceName: eventHubNamespaceName
     containerImageUri: effectiveImageUri
-    eventHubConnectionString: eventHubConnectionString
   }
 }
 
