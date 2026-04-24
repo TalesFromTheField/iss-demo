@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.42.1.51946",
-      "templateHash": "5284597087120780907"
+      "templateHash": "1857165299377172824"
     }
   },
   "parameters": {
@@ -745,7 +745,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.42.1.51946",
-              "templateHash": "8286661584758540411"
+              "templateHash": "12950506904967582763"
             }
           },
           "parameters": {
@@ -777,7 +777,7 @@
           },
           "variables": {
             "eventHubsDataSenderRoleId": "2b629674-e913-4c01-ae53-ef4638d8f975",
-            "acrPullRoleId": "7f951dda-4ed3-468d-8ac7-5cbf6c5e8b58"
+            "acrPullRoleId": "7f951dda-4ed3-4680-a7ca-43fe172d538d"
           },
           "resources": [
             {

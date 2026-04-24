@@ -26,7 +26,7 @@ param acrResourceId string = ''
 var eventHubsDataSenderRoleId = '2b629674-e913-4c01-ae53-ef4638d8f975'
 
 @description('Built-in role definition ID for AcrPull.')
-var acrPullRoleId = '7f951dda-4ed3-468d-8ac7-5cbf6c5e8b58'
+var acrPullRoleId = '7f951dda-4ed3-4680-a7ca-43fe172d538d'
 
 // ── Existing Resource Reference ─────────────────────────────────────────────
 
