@@ -1,107 +1,108 @@
-# ✅ Demo Acceptance Criteria
+# Demo Acceptance Criteria
 
-> How do you know the ISS Demo is working? This document defines "done" and provides a smoke test checklist.
+This document defines when the ISS demo is considered complete and working.
 
-## 🎯 Definition of Done
+## Definition of Done
 
-The demo is **complete and working** when a new user can:
+The demo is complete when a new user can:
 
-1. Fork/clone the repository
-2. Configure OIDC credentials and GitHub secrets
-3. Push to `main` to trigger automated deployment
-4. Complete Fabric setup (manual, ~15 min)
-5. See live ISS coordinates updating on a Power BI dashboard
+1. Clone the repository.
+2. Use the Deploy to Azure button to provision the Azure resources.
+3. Complete Fabric setup.
+4. Open Power BI and see live ISS updates.
 
-**Target time: < 30 minutes from start to live dashboard.**
+Target time: less than 30 minutes from start to live dashboard.
 
-## 🔍 End-to-End Acceptance Test
+## End-to-End Acceptance Test
 
 ### Prerequisites Verified
 
 - [ ] Azure subscription with Contributor access
 - [ ] Fabric workspace with capacity
-- [ ] GitHub secrets configured (AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID)
-- [ ] Resource group created
+- [ ] Azure resources can be created in the selected subscription
 
-### Azure Deployment (Automated)
+### Azure Deployment
 
-- [ ] CI pipeline passes: lint ✅, unit tests ✅, Bicep validation ✅
-- [ ] CD pipeline deploys infrastructure without errors
-- [ ] CD pipeline deploys Function App without errors
-- [ ] Post-deploy smoke test passes
+- [ ] Deploy to Azure button deployment completes without errors
+- [ ] Azure Container Registry is created
+- [ ] Container App is created
+- [ ] Container App is deployed with the published GHCR image
 
-### Function App
+### Container App
 
-- [ ] Function App state is `Running`
-- [ ] `get_iss_location` function is registered and executing every ~5 seconds
-- [ ] `get_astronauts` function is registered and executing every ~1 minute
-- [ ] Application Insights shows successful executions (no persistent failures)
+- [ ] Container App provisioning state is `Succeeded`
+- [ ] Container App logs show the scheduler starting
+- [ ] ISS location events are emitted every ~5 seconds
+- [ ] Astronaut events are emitted every ~1 minute
 
 ### Event Hubs
 
-- [ ] `iss-location` hub receiving messages (IncomingMessages > 0)
-- [ ] `astronauts` hub receiving messages (IncomingMessages > 0)
+- [ ] `iss-location` hub receives messages
+- [ ] `astronauts` hub receives messages
 - [ ] `fabric-eventstream` consumer groups exist on both hubs
 
 ### Fabric Resources
 
-- [ ] Eventhouse created
-- [ ] KQL Database created and attached to Eventhouse
-- [ ] ISS Location EventStream: source → Event Hub, destination → KQL DB
-- [ ] Astronauts EventStream: source → Event Hub, destination → KQL DB
+- [ ] Eventhouse exists
+- [ ] KQL Database exists and is attached to the Eventhouse
+- [ ] ISS Location EventStream connects Event Hub to KQL Database
+- [ ] Astronauts EventStream connects Event Hub to KQL Database
 
 ### KQL Database
 
-- [ ] `ISS_Loc` table exists and has records
-- [ ] `Astronauts` table exists and has records
-- [ ] Record counts are increasing over time
-- [ ] KQL queries from `kql/ISS.kql` return valid results
+- [ ] `ISS_Loc` table exists and contains records
+- [ ] `Astronauts` table exists and contains records
+- [ ] Record counts increase over time
+- [ ] Queries from `kql/ISS.kql` return valid results
 
 ### Power BI Dashboard
 
-- [ ] Dashboard connects to KQL Database
-- [ ] ISS position shows on map
+- [ ] Dashboard connects to the KQL Database
+- [ ] ISS position renders on the map
 - [ ] Orbital trajectory visualization works
-- [ ] Astronaut list displays current crew
+- [ ] Astronaut list displays the current crew
 - [ ] Auto-refresh updates the dashboard every 5 seconds
 
-## 🧪 Quick Smoke Test Commands
+## Quick Smoke Test Commands
 
 ```bash
-# Check Function App status
-az functionapp show --name func-iss-dev --resource-group rg-iss-demo-dev --query "state" -o tsv
+az containerapp show \
+  --name ca-iss-dev \
+  --resource-group rg-iss-demo-dev \
+  --query "properties.provisioningState" -o tsv
 
-# List registered functions
-az functionapp function list --name func-iss-dev --resource-group rg-iss-demo-dev --query "[].name" -o tsv
+az containerapp show \
+  --name ca-iss-dev \
+  --resource-group rg-iss-demo-dev \
+  --query "properties.template.containers[0].image" -o tsv
 
-# Check Event Hub metrics (last 5 minutes)
+az containerapp logs show \
+  --name ca-iss-dev \
+  --resource-group rg-iss-demo-dev \
+  --follow
+
 az monitor metrics list \
   --resource "/subscriptions/<SUB_ID>/resourceGroups/rg-iss-demo-dev/providers/Microsoft.EventHub/namespaces/evhns-iss-dev/eventhubs/iss-location" \
   --metric "IncomingMessages" \
   --interval PT5M \
   --query "value[0].timeseries[0].data[-1].total" -o tsv
-
-# Check Application Insights for recent executions
-az monitor app-insights query \
-  --app appi-iss-dev \
-  --analytics-query "requests | where timestamp > ago(5m) | summarize count() by name"
 ```
 
-## 🚨 Failure Modes & Recovery
+## Failure Modes and Recovery
 
 | Failure | Detection | Recovery |
-|---------|-----------|----------|
-| Function App crash loop | App Insights alerts, zero executions | Check logs, redeploy via CD |
-| Open Notify API down | Warning logs, no new events | Automatic recovery when API returns (retry logic handles transient failures) |
-| Event Hub quota exceeded | Throttling errors in logs | Upgrade to higher tier or reduce polling frequency |
-| Fabric EventStream disconnected | KQL tables stop growing | Reconnect in Fabric portal, check Event Hub connection |
-| Power BI refresh failure | Stale dashboard | Verify KQL DB URI parameter, re-authenticate |
+| --- | --- | --- |
+| Container App crash loop | Logs show restart or startup failures | Check Container App logs, fix image or settings, redeploy image if needed |
+| Open Notify API down | Warning logs and no new events | Automatic recovery when the upstream API returns |
+| Event Hub quota exceeded | Throttling errors in logs | Upgrade tier or reduce polling frequency |
+| Fabric EventStream disconnected | KQL tables stop growing | Reconnect the EventStream and verify Event Hub connectivity |
+| Power BI refresh failure | Stale dashboard | Verify KQL parameters and refresh settings |
 
-## 📊 Success Metrics
+## Success Metrics
 
 When everything is working, you should see:
 
-- **~12 ISS location events/minute** (every 5 seconds)
-- **~1 astronaut event/minute** (every minute)
-- **< 10 second latency** from API poll to Power BI refresh
-- **Zero persistent failures** in Application Insights (transient retries are OK)
+- About 12 ISS location events per minute
+- About 1 astronaut event per minute
+- Less than 10 seconds from poll to Power BI refresh
+- No persistent failures in the Container App logs

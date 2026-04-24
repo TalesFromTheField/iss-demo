@@ -13,8 +13,8 @@ param environmentName string
 @description('Azure region for all resources.')
 param location string = resourceGroup().location
 
-@description('Container image URI (e.g., acrissdev.azurecr.io/iss-demo:latest or docker.io/org/iss-demo:latest).')
-param containerImageUri string = ''
+@description('Container image URI. Defaults to the public GHCR image published from repository releases.')
+param containerImageUri string = 'ghcr.io/talesfromthefield/iss-demo:latest'
 
 @description('Event Hubs connection string (for container app environment).')
 @secure()
@@ -52,10 +52,10 @@ module containerRegistry 'modules/container-registry.bicep' = {
 
 // ── Module: Container App ──────────────────────────────────────────────────
 
-// Determine effective image URI (use provided image or construct from ACR)
+// Determine effective image URI (use provided image or fall back to the public release image)
 var effectiveImageUri = !empty(containerImageUri) 
   ? containerImageUri 
-  : '${containerRegistry.outputs.loginServer}/iss-demo:latest'
+  : 'ghcr.io/talesfromthefield/iss-demo:latest'
 
 // For Event Hub connection string, retrieve it from the Event Hubs namespace if not provided
 module eventHubsConnStr 'modules/get-eventhub-connstr.bicep' = if (empty(eventHubConnectionString)) {
@@ -68,7 +68,7 @@ module eventHubsConnStr 'modules/get-eventhub-connstr.bicep' = if (empty(eventHu
 
 var effectiveEventHubConnectionString = !empty(eventHubConnectionString)
   ? eventHubConnectionString
-  : eventHubsConnStr.outputs.connectionString
+  : eventHubsConnStr!.outputs.connectionString
 
 module containerApp 'modules/container-app.bicep' = {
   name: 'container-app'

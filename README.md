@@ -12,7 +12,7 @@
   <!-- CI/CD badges — update URLs once workflows are configured -->
   <img src="https://img.shields.io/badge/build-passing-brightgreen?style=flat-square" alt="Build Status">
   <img src="https://img.shields.io/badge/python-3.11-blue?style=flat-square&logo=python" alt="Python 3.11">
-  <img src="https://img.shields.io/badge/azure-functions-0078D4?style=flat-square&logo=azure-functions" alt="Azure Functions">
+  <img src="https://img.shields.io/badge/azure-container%20apps-0078D4?style=flat-square" alt="Azure Container Apps">
   <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="License">
 </p>
 
@@ -26,9 +26,10 @@
   </a>
 </p>
 
-The button provisions Azure infrastructure from `infra/main.bicep` (Event Hubs, Function App, monitoring, RBAC).
+The button provisions Azure infrastructure from `infra/main.bicep` and deploys the Container App with the public image
+published from repository releases.
 
-After the template deployment finishes, deploy the Function App code and complete Fabric + Power BI setup using the
+After the template deployment finishes, complete Fabric + Power BI setup using the
 [Deployment Guide](docs/deployment-guide.md).
 
 ---
@@ -57,7 +58,9 @@ It's a fun, end-to-end showcase of **real-time data streaming** from the cloud t
 
 ## 🏗️ Architecture
 
-The ISS Tracker uses **Azure Functions** (Python v2) to poll the Open Notify API on a timer, push events into **Event Hubs**, and stream them through **Microsoft Fabric** into a **KQL Database** for real-time analysis and **Power BI** visualization.
+The ISS Tracker uses **Azure Container Apps** to run a Python scheduler that polls the Open Notify API, pushes events
+into **Event Hubs**, and streams them through **Microsoft Fabric** into a **KQL Database** for real-time analysis and
+**Power BI** visualization.
 
 <p align="center">
   <img src="./images/architecture.png" alt="Architecture Diagram" width="700">
@@ -66,7 +69,7 @@ The ISS Tracker uses **Azure Functions** (Python v2) to poll the Open Notify API
 **Data Flow:**
 
 ```
-🌐 Open Notify API  →  ⚡ Azure Functions (timer-triggered)
+🌐 Open Notify API  →  ⚡ Azure Container Apps (scheduled worker)
                               ↓
                         📡 Azure Event Hubs
                               ↓
@@ -83,7 +86,7 @@ The ISS Tracker uses **Azure Functions** (Python v2) to poll the Open Notify API
 
 Ready to deploy? Here's how to get rolling:
 
-1. **☁️ Deploy Azure Infrastructure** — Follow the [Deployment Guide](docs/deployment-guide.md) to provision Azure Functions, Event Hubs, monitoring, and RBAC via Bicep + GitHub Actions.
+1. **☁️ Deploy Azure Infrastructure** — Follow the [Deployment Guide](docs/deployment-guide.md) to use the Deploy to Azure button and provision the running Azure stack without local build steps.
 2. **🧵 Set Up Microsoft Fabric** — Follow the [Fabric Setup Guide](docs/fabric-setup.md) to configure EventStreams, KQL Database, and Power BI.
 3. **🎉 Watch the ISS fly!** — Open your Power BI dashboard and see the station orbit in real-time.
 
@@ -93,7 +96,8 @@ Ready to deploy? Here's how to get rolling:
 
 | Component | Status | Details |
 |---|---|---|
-| Azure Functions | ✅ Automated | Deployed via Bicep + GitHub Actions CI/CD |
+| Azure infrastructure | ✅ Automated | Provisioned by the Deploy to Azure button |
+| Scheduler image | ✅ Automated | Pulled from the public GHCR image published from releases |
 | Event Hubs | ✅ Automated | Provisioned via Bicep modules |
 | Monitoring & Alerts | ✅ Automated | Application Insights + Log Analytics via Bicep |
 | RBAC & Permissions | ✅ Automated | Role assignments configured in Bicep |
@@ -127,11 +131,12 @@ Check out what the finished dashboard looks like! 🎨
 
 | | Technology | What It Does |
 |---|---|---|
-| 🐍 | **Python 3.11** | Azure Functions runtime language |
-| ⚡ | **Azure Functions (v2)** | Timer-triggered ISS data poller |
+| 🐍 | **Python 3.11** | Scheduler runtime language |
+| ⚡ | **Azure Container Apps** | Hosts the continuously running polling worker |
+| ⏱️ | **APScheduler** | Runs the 5-second and 60-second polling intervals |
 | 📡 | **Azure Event Hubs** | Real-time event ingestion |
 | 🏗️ | **Bicep** | Infrastructure-as-Code for Azure resources |
-| 🔄 | **GitHub Actions** | CI/CD pipeline for automated deployments |
+| 🔄 | **GitHub Actions** | CI plus release-image publishing |
 | 🧵 | **Microsoft Fabric** | EventStreams + Real-Time Intelligence |
 | 🔍 | **KQL (Kusto Query Language)** | Ad-hoc data exploration and analysis |
 | 📊 | **Power BI** | Real-time dashboards and visualization |
@@ -142,16 +147,18 @@ Check out what the finished dashboard looks like! 🎨
 
 ```
 iss-demo/
-├── 📂 functions/              # Azure Functions (Python v2)
-│   ├── function_app.py        #   Timer-triggered ISS poller
+├── 📂 functions/              # Scheduler logic and container entrypoint
+│   ├── function_app.py        #   Shared polling logic
+│   ├── run.py                 #   APScheduler-based container entrypoint
 │   ├── requirements.txt       #   Python dependencies
-│   ├── host.json              #   Functions host config
+│   ├── host.json              #   Legacy Functions host config
 │   └── tests/                 #   Unit & integration tests (pytest)
 ├── 📂 infra/                  # Infrastructure-as-Code
 │   ├── main.bicep             #   Orchestrator — wires all modules
 │   ├── modules/
 │   │   ├── event-hubs.bicep   #   Event Hubs namespace + hubs
-│   │   ├── function-app.bicep #   Storage, Plan, Function App + MI
+│   │   ├── container-app.bicep #  Container Apps environment + app + MI
+│   │   ├── container-registry.bicep # ACR for custom image overrides
 │   │   ├── monitoring.bicep   #   App Insights + Log Analytics
 │   │   └── role-assignments.bicep # RBAC: MI → Event Hubs Data Sender
 │   └── parameters/

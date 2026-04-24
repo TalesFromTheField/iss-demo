@@ -132,7 +132,7 @@ ISS_Loc
 
 | Problem                      | Solution                                                                                              |
 |------------------------------|-------------------------------------------------------------------------------------------------------|
-| EventStream shows no data    | Verify Function App is running and Event Hub has events (`az eventhubs eventhub show`)                |
+| EventStream shows no data    | Verify the Container App is running and check its logs (`az containerapp logs show -n ca-iss-dev -g rg-iss-demo-dev --follow`) |
 | KQL table not created        | Ensure EventStream destination mapping is complete — table is auto-created on first event             |
 | Power BI won't connect       | Double-check `kusto_db_url` parameter — it should be the full URI from KQL DB settings               |
 | Consumer group error         | Ensure `fabric-eventstream` consumer group exists on the Event Hub (created by Bicep)                |

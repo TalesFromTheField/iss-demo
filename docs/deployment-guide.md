@@ -1,171 +1,78 @@
-# 🚀 Deployment Guide
+# Deployment Guide
 
-> From zero to live ISS tracking — here's the happy path!
+This guide covers the supported deployment path for the ISS demo.
 
-This guide walks you through deploying the full ISS Demo stack: Azure infrastructure via Bicep, Microsoft Fabric real-time analytics, and a Power BI dashboard that tracks the International Space Station across the globe. Buckle up! 🛰️
+The intended customer flow is:
 
-## One-Click Azure Infra Deployment
+1. Click the Deploy to Azure button.
+2. Let Azure provision the infrastructure.
+3. Let the deployed Container App run from the public image published from repository releases.
+4. Complete the Fabric and Power BI setup.
 
-Use the repository's Deploy to Azure button for portal-based provisioning of Azure infrastructure:
+No local Docker build is required for customers using the Deploy to Azure button.
+
+## One-Click Azure Deployment
+
+Use the repository's Deploy to Azure button for portal-based provisioning:
 
 [![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FTalesFromTheField%2Fiss-demo%2Fmain%2Finfra%2Fazuredeploy.json)
 
-This deployment provisions resources defined in `infra/main.bicep`:
-- **Event Hubs namespace** (Standard tier) with 2 hubs and consumer groups
-- **Azure Container Registry** (Basic tier) for container images
-- **Container App Environment** and **Container App** running the ISS scheduler
-- **Application Insights** + **Log Analytics** workspace
-- **RBAC role assignments** (Container App Managed Identity → Event Hubs Data Sender)
+The deployment provisions:
 
-✅ **Fully IaC-based:** All infrastructure is defined in Bicep. After the portal deployment, manually build and push the Docker image to ACR (see Step 1B).
+- Event Hubs namespace with `iss-location` and `astronauts`
+- Azure Container Registry
+- Container Apps environment and Container App
+- Application Insights and Log Analytics
+- RBAC for the Container App managed identity
 
-### Step 1B: Build & Push Container Image (after portal deployment)
+By default, the Container App uses the public image `ghcr.io/talesfromthefield/iss-demo:latest`, which is published by the repository's release workflow.
+
+## Step 1: Deploy Azure Resources
+
+1. Click the Deploy to Azure button.
+2. Choose the Azure subscription and resource group.
+3. Set `environmentName` and `location`.
+4. Review the template parameters.
+5. Start the deployment.
+
+Optional:
+
+- You can override `containerImageUri` if you want to deploy a different published image.
+- Most customers should keep the default image value.
+
+Checkpoint:
 
 ```bash
-# Build the Docker image
-docker build -t ca-iss-dev:latest .
-
-# Log in to your Azure Container Registry
-az acr login --name acrissdev
-
-# Tag the image for your registry
-docker tag ca-iss-dev:latest acrissdev.azurecr.io/iss-demo:latest
-
-# Push to ACR
-docker push acrissdev.azurecr.io/iss-demo:latest
-
-# Update the Container App to pull the latest image
-az containerapp update \
+az containerapp show \
   --name ca-iss-dev \
   --resource-group rg-iss-demo-dev \
-  --image acrissdev.azurecr.io/iss-demo:latest
-```
-### Step 1B: Automated Build & Push (via GitHub Actions CD Pipeline)
-2. **Add federated credentials for GitHub Actions**
-The CD pipeline (`.github/workflows/cd.yml`) automatically:
-1. **Deploys infrastructure** (ACR, Container App skeleton, Event Hubs, monitoring)
-2. **Builds and pushes the Docker image** to ACR
-3. **Updates the Container App** with the built image
-4. **Runs smoke tests** to verify the deployment
-   - In the App Registration → Certificates & secrets → Federated credentials → Add credential
-✅ **No manual steps needed!** Push to `main` to trigger the CD workflow:
-   - Issuer: `https://token.actions.githubusercontent.com`
-```bash
-git push origin main
-```
-   - **Primary (required for CD):** Subject identifier: `repo:talesfromthefield/iss-demo:environment:dev` — Name: `github-actions-dev-env`
-The CD pipeline will handle everything from infrastructure to running container.
-   - **Optional (for CI on main):** Subject identifier: `repo:talesfromthefield/iss-demo:ref:refs/heads/main` — Name: `github-actions-main`
-To push to `main` and trigger the workflow:
+  --query "properties.provisioningState" -o tsv
 
-```bash
-# Make changes
-git add .
-git commit -m "update: scheduler changes"
-   > ⚠️ **Important:** The CD workflow uses `environment: dev`, so the `environment:dev` credential is **required**. The `ref:refs/heads/main` credential only matches jobs without an environment.
-# Push to main (or merge a PR)
-git push origin main
-
-# Check workflow status
-gh run list --workflow=cd.yml --limit 1
-```
-3. **Note the following values** (you'll need them for GitHub secrets):
-**Checkpoint:** Monitor the GitHub Actions run to confirm:
-- ✅ `deploy-infra` job completes (infrastructure deployed)
-- ✅ `build-image` job completes (image built and pushed)
-- ✅ `update-container-app` job completes (image deployed to Container App)
-- ✅ `smoke-test` job completes (Container App is healthy and events flowing)
-   - `CLIENT_ID` — from the App Registration overview
-   - `TENANT_ID` — from the App Registration overview
-   - `SUBSCRIPTION_ID` — from your Azure subscription
-
-4. **Create a resource group:**
-   ```bash
-   az group create -n rg-iss-demo-dev -l eastus2
-   ```
-   ### Step 1B: Automated Build & Push (via GitHub Actions CD Pipeline)
-> 🛡️ **Security note:** These are non-sensitive identifiers — the actual auth happens via OIDC federation. No passwords or client secrets needed!
-   The CD pipeline (`.github/workflows/cd.yml`) automatically:
-   1. **Deploys infrastructure** (ACR, Container App skeleton, Event Hubs, monitoring)
-   2. **Builds and pushes the Docker image** to ACR
-   3. **Updates the Container App** with the built image
-   4. **Runs smoke tests** to verify the deployment
-
-   ✅ **No manual steps needed!** Push to `main` to trigger the CD workflow:
-## Step 1: Deploy Azure Resources ☁️ (~5-10 min)
-   ```bash
-   git push origin main
-   ```
-
-   The CD pipeline will handle everything from infrastructure to running container.
-### Option A: One-Click Portal Deployment (Easiest)
-   To push to `main` and trigger the workflow:
-
-   ```bash
-   # Make changes
-   git add .
-   git commit -m "update: scheduler changes"
-Click the "Deploy to Azure" button above. The portal will:
-   # Push to main (or merge a PR)
-   git push origin main
-1. Prompt for resource group and environment parameters
-   # Check workflow status
-   gh run list --workflow=cd.yml --limit 1
-   ```
-2. Provision Event Hubs, Container Registry, Monitoring, and Container App skeleton
-   **Checkpoint:** Monitor the GitHub Actions run to confirm:
-   - ✅ `deploy-infra` job completes (infrastructure deployed)
-   - ✅ `build-image` job completes (image built and pushed)
-   - ✅ `update-container-app` job completes (image deployed to Container App)
-   - ✅ `smoke-test` job completes (Container App is healthy and events flowing)
-3. Set up RBAC roles
-
-After deployment, follow **Step 1B** to build and push the container image.
-
-### Option B: Manual Bicep Deployment via Azure CLI
-
-```bash
-az group create -n rg-iss-demo-dev -l eastus2
-
-az deployment group create \
+az containerapp show \
+  --name ca-iss-dev \
   --resource-group rg-iss-demo-dev \
-  --template-file infra/main.bicep \
-  --parameters infra/parameters/dev.bicepparam
+  --query "properties.template.containers[0].image" -o tsv
 ```
 
-**Key resources deployed:**
-- **Container App** (skeleton, waiting for image)
-- **Event Hubs namespace** (Standard tier) with 2 hubs (`iss-location` + `astronauts`)
-- **Azure Container Registry** for storing container images
-- **Application Insights** + **Log Analytics** workspace
-- **RBAC role assignments** (Container App Managed Identity → Event Hubs Data Sender)
+Expected results:
 
-The Bicep templates in `infra/` handle all the resource provisioning — no portal clicking required! 🎉
+- Provisioning state is `Succeeded`
+- Image is `ghcr.io/talesfromthefield/iss-demo:latest` or your override
 
-✅ **Checkpoint:** Infrastructure is deployed and ready for container image
-```bash
-# Verify Container App exists (image may be pending)
-az containerapp show -n ca-iss-dev -g rg-iss-demo-dev --query "properties.provisioningState" -o tsv
-# Expected: Succeeded
-
-# Verify Event Hubs namespace exists
-az eventhubs namespace show -n evhns-iss-dev -g rg-iss-demo-dev --query "name" -o tsv
-# Expected: evhns-iss-dev
-```
-
-## Step 2: Configure Fabric 🌐 (~10 min)
+## Step 2: Configure Fabric
 
 Follow the [Fabric Setup Guide](./fabric-setup.md) to:
 
-1. **Create Eventhouse + KQL Database** (or run `scripts/deploy-fabric.sh` for automated setup)
-2. **Create 2 EventStreams** and wire them:
-   - `iss-location` Event Hub → `ISS_Loc` KQL table
-   - `astronauts` Event Hub → `Astronauts` KQL table
-3. **Verify data** is flowing into the KQL Database
+1. Create an Eventhouse and KQL Database, or run `scripts/deploy-fabric.sh`
+2. Create two EventStreams:
+   - `iss-location` Event Hub to `ISS_Loc`
+   - `astronauts` Event Hub to `Astronauts`
+3. Verify data is flowing into the KQL Database
 
-> 🌊 **What's happening:** The Container App runs a scheduler (APScheduler) that polls the ISS APIs every 5 seconds, pushes events to Event Hubs, and Fabric EventStreams ingest them into KQL tables in real time.
+The Container App starts the APScheduler worker automatically. It polls the ISS APIs, sends events to Event Hubs, and Fabric ingests them into KQL.
 
-✅ **Checkpoint:** `ISS_Loc | count` returns increasing numbers
+Checkpoint:
+
 ```kql
 ISS_Loc
 | count
@@ -174,91 +81,93 @@ Astronauts
 | count
 ```
 
-## Step 3: Import Power BI Dashboard 📊 (~5 min)
+Both counts should increase over time.
 
-1. Open `PBI/ISS.pbix` in **Power BI Desktop**
-2. Update parameters (Transform data → Edit parameters):
-   - `kusto_db_url` → Your KQL Database URI (found in KQL DB settings)
-   - `kusto_db_name` → `iss-demo-kqldb`
-3. Click **Refresh** to pull live data
-4. Configure auto-refresh:
-   - Page settings → Page refresh → **Every 5 seconds**
-   - *(Requires DirectQuery mode or a Fabric capacity that supports auto page refresh at this interval)*
-5. **Publish** to your Fabric workspace
+## Step 3: Import the Power BI Dashboard
 
-✅ **Checkpoint:** Live ISS position updating on the map! 🗺️
+1. Open `PBI/ISS.pbix` in Power BI Desktop.
+2. Update the parameters:
+   - `kusto_db_url`: your KQL Database URI
+   - `kusto_db_name`: `iss-demo-kqldb`
+3. Refresh the report.
+4. Configure page refresh for every 5 seconds.
+5. Publish the report to your Fabric workspace.
 
-## Step 4: Validate 🎉
+## Step 4: Validate
 
-Run through the smoke test checklist to confirm everything is humming:
+Use this smoke test checklist:
 
-- [ ] **Container App is provisioned**
+- [ ] Container App is provisioned
+
   ```bash
-  az containerapp show -n ca-iss-dev -g rg-iss-demo-dev --query "properties.provisioningState" -o tsv
-  # Expected: Succeeded
+  az containerapp show \
+    --name ca-iss-dev \
+    --resource-group rg-iss-demo-dev \
+    --query "properties.provisioningState" -o tsv
   ```
-- [ ] **Container App is running the image**
+
+- [ ] Container App is using the expected image
+
   ```bash
-  # Check Container App properties
-  az containerapp show -n ca-iss-dev -g rg-iss-demo-dev --query "properties.template.containers[0].image" -o tsv
-  # Expected: acrissdev.azurecr.io/iss-demo:latest (or similar)
+  az containerapp show \
+    --name ca-iss-dev \
+    --resource-group rg-iss-demo-dev \
+    --query "properties.template.containers[0].image" -o tsv
   ```
-- [ ] **Check Container App logs** for scheduler startup
+
+- [ ] Scheduler startup appears in logs
+
   ```bash
-  az containerapp logs show -n ca-iss-dev -g rg-iss-demo-dev -f
-  # Expected: "Scheduler started. Jobs running..."
+  az containerapp logs show \
+    --name ca-iss-dev \
+    --resource-group rg-iss-demo-dev \
+    --follow
   ```
-- [ ] **Events flowing through Event Hubs** — check incoming messages in the Azure Portal
-- [ ] **KQL Database has data** in both `ISS_Loc` and `Astronauts` tables
-- [ ] **Power BI dashboard auto-refreshes** — watch the ISS dot move! 🛰️
 
-> 🎊 **Congratulations!** You've got a live ISS tracking dashboard powered by a containerized Python scheduler, Azure Event Hubs, Microsoft Fabric, and Power BI. That's a lot of cloud goodness!
+- [ ] Event Hubs are receiving messages
+- [ ] Fabric KQL tables contain data
+- [ ] Power BI refreshes with current ISS position
 
-## 🔧 Troubleshooting
+## Maintainer Override: Custom Image Build
 
-Hit a snag? Here are the most common issues and their fixes:
+Customers using the deploy button do not need this section.
+
+Maintainers can still build a custom image and deploy it by overriding `containerImageUri` in the template or updating the Container App after deployment.
+
+```bash
+docker build -t iss-demo:custom .
+```
+
+## Troubleshooting
 
 | Problem | Likely Cause | Solution |
-|---------|-------------|----------|
-| Container App shows no image | CD pipeline not yet run | Check GitHub Actions: `gh run list --workflow=cd.yml --limit 1` — ensure `build-image` and `update-container-app` jobs completed |
-| Container App not provisioning | Invalid image URI or ACR access | Verify ACR exists and image is in registry: `az acr repository list -n acrissdev` |
-| Container App shows stale image | Need to update deployment | Re-run `az containerapp update` with new image URI |
-| No events in Event Hub | Container not running or no logs | Check: `az containerapp logs show -n ca-iss-dev -g rg-iss-demo-dev` |
-| Fabric EventStream no data | Consumer group mismatch | Ensure using `fabric-eventstream` consumer group |
-| Power BI shows stale data | Auto-refresh not configured | Set DirectQuery refresh interval to 5s |
-| RBAC errors in Container App logs | Managed Identity not assigned role | Verify role assignment: `az role assignment list --assignee <app-principal-id> --resource-group rg-iss-demo-dev` |
-| KQL query returns 0 rows | EventStream not wired correctly | Re-check source/destination mappings in the Fabric portal |
-| Docker build fails locally | Missing dependencies | Run `pip install -r functions/requirements.txt` before build |
+| --- | --- | --- |
+| Container App is provisioned but not starting | The published image is unavailable or the revision failed | Check `az containerapp logs show -n ca-iss-dev -g rg-iss-demo-dev --follow` |
+| Container App is using the wrong image | Template override or stale revision | Check `containerImageUri` in the deployment and verify the deployed revision |
+| No events in Event Hubs | Scheduler failed at runtime | Review Container App logs and Application Insights |
+| Fabric EventStream shows no data | EventStream source or consumer group is wrong | Verify `fabric-eventstream` is selected for both Event Hubs |
+| Power BI shows stale data | Auto-refresh or connection is misconfigured | Recheck the KQL connection parameters and refresh settings |
 
-> 🆘 **Still stuck?** Open an issue on the repo with the `bug` label and include the relevant logs. We're happy to help!
+## Architecture Reference
 
-## 📐 Architecture Reference
-
-Here's how all the pieces fit together:
-
-```
-GitHub Actions (CI/CD)
+```text
+Deploy to Azure button
   │
-  ├── Deploy: Bicep → Azure Resource Group
-  │     ├── Event Hubs Namespace (Standard)
-  │     │     ├── iss-location hub
-  │     │     └── astronauts hub
-  │     ├── Function App (Python 3.11, Consumption)
-  │     ├── Application Insights + Log Analytics
-  │     └── RBAC: Function App MI → Event Hubs Data Sender
-  │
-  └── Deploy: Function App code
-        ├── get_iss_location (every 5s)
-        └── get_astronauts (every 1m)
+  └── ARM template wrapper → Bicep deployment
+        ├── Event Hubs namespace
+        ├── Azure Container Registry
+        ├── Container Apps environment
+        ├── Container App
+        ├── Application Insights
+        └── RBAC assignments
 
-Fabric (Manual / CLI setup)
-  ├── EventStreams (2x) ← Event Hubs
+Public release image
+  └── GHCR package → Container App image pull
+
+Fabric setup
+  ├── EventStreams ← Event Hubs
   ├── KQL Database ← EventStreams
-  └── Power BI Dashboard ← KQL Database
+  └── Power BI ← KQL Database
 ```
 
-For deeper architectural context, see the [Architecture Decision Records](./architecture.md) and the [Code Walkthrough](./code-walkthrough.md).
-
----
-
-*Happy tracking! If you can see the ISS moving across your dashboard, you've nailed it.* 🚀✨
+For broader context, see [docs/architecture.md](./architecture.md) and [docs/code-walkthrough.md](./code-walkthrough.md).
