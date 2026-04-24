@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.42.1.51946",
-      "templateHash": "9348716198739043725"
+      "templateHash": "2062633085668513876"
     }
   },
   "parameters": {
@@ -26,7 +26,7 @@
       "type": "string",
       "defaultValue": "",
       "metadata": {
-        "description": "Container image URI (e.g., acrissdev.azurecr.io/iss-demo:latest or docker.io/org/iss-demo:latest)."
+        "description": "Container image URI override. Defaults to the latest published GHCR image when empty."
       }
     },
     "eventHubConnectionString": {
@@ -36,6 +36,9 @@
         "description": "Event Hubs connection string (for container app environment)."
       }
     }
+  },
+  "variables": {
+    "effectiveImageUri": "[if(not(empty(parameters('containerImageUri'))), parameters('containerImageUri'), 'ghcr.io/talesfromthefield/iss-demo:latest')]"
   },
   "resources": [
     {
@@ -583,7 +586,9 @@
           "astronautsHubName": {
             "value": "[reference(resourceId('Microsoft.Resources/deployments', 'event-hubs'), '2025-04-01').outputs.astronautsHubName.value]"
           },
-          "containerImageUri": "[if(not(empty(parameters('containerImageUri'))), createObject('value', parameters('containerImageUri')), createObject('value', format('{0}/iss-demo:latest', reference(resourceId('Microsoft.Resources/deployments', 'container-registry'), '2025-04-01').outputs.loginServer.value)))]",
+          "containerImageUri": {
+            "value": "[variables('effectiveImageUri')]"
+          },
           "eventHubConnectionString": "[if(not(empty(parameters('eventHubConnectionString'))), createObject('value', parameters('eventHubConnectionString')), createObject('value', reference(resourceId('Microsoft.Resources/deployments', 'get-eventhub-connstr'), '2025-04-01').outputs.connectionString.value))]"
         },
         "template": {
@@ -753,7 +758,6 @@
         }
       },
       "dependsOn": [
-        "[resourceId('Microsoft.Resources/deployments', 'container-registry')]",
         "[resourceId('Microsoft.Resources/deployments', 'event-hubs')]",
         "[resourceId('Microsoft.Resources/deployments', 'get-eventhub-connstr')]",
         "[resourceId('Microsoft.Resources/deployments', 'monitoring')]"
@@ -899,7 +903,7 @@
       "metadata": {
         "description": "Container image URI deployed."
       },
-      "value": "[if(not(empty(parameters('containerImageUri'))), parameters('containerImageUri'), format('{0}/iss-demo:latest', reference(resourceId('Microsoft.Resources/deployments', 'container-registry'), '2025-04-01').outputs.loginServer.value))]"
+      "value": "[variables('effectiveImageUri')]"
     },
     "acrLoginServer": {
       "type": "string",
