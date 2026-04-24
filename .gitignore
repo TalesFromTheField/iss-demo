@@ -14,7 +14,7 @@ local.settings.json
 bin/
 
 # IDE files
-.vscode/
+
 .idea/
 *.swp
 *.swo
