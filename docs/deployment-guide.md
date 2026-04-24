@@ -40,36 +40,41 @@ az containerapp update \
   --resource-group rg-iss-demo-dev \
   --image acrissdev.azurecr.io/iss-demo:latest
 ```
-
-> **Note:** For now, the CD pipeline is not automated. Push the image manually to iterate on the scheduler code.
-
-## 📋 Prerequisites
-
-Before you begin, make sure you have:
-
-- **Azure subscription** with permissions to create resources
-- **Microsoft Fabric workspace** with capacity assigned
-- **GitHub repository** forked/cloned
-- **Azure CLI** installed (`az --version`)
-- **GitHub CLI** (optional, for creating secrets)
-
-### OIDC Setup (One-Time)
-
-GitHub Actions authenticates to Azure using OpenID Connect — no stored secrets needed! 🔐
-
-1. **Create an Entra App Registration**
-   - Navigate to Azure Portal → Entra ID → App registrations → New registration
-   - Name it something memorable (e.g., `iss-demo-github-actions`)
-
+### Step 1B: Automated Build & Push (via GitHub Actions CD Pipeline)
 2. **Add federated credentials for GitHub Actions**
+The CD pipeline (`.github/workflows/cd.yml`) automatically:
+1. **Deploys infrastructure** (ACR, Container App skeleton, Event Hubs, monitoring)
+2. **Builds and pushes the Docker image** to ACR
+3. **Updates the Container App** with the built image
+4. **Runs smoke tests** to verify the deployment
    - In the App Registration → Certificates & secrets → Federated credentials → Add credential
+✅ **No manual steps needed!** Push to `main` to trigger the CD workflow:
    - Issuer: `https://token.actions.githubusercontent.com`
+```bash
+git push origin main
+```
    - **Primary (required for CD):** Subject identifier: `repo:talesfromthefield/iss-demo:environment:dev` — Name: `github-actions-dev-env`
+The CD pipeline will handle everything from infrastructure to running container.
    - **Optional (for CI on main):** Subject identifier: `repo:talesfromthefield/iss-demo:ref:refs/heads/main` — Name: `github-actions-main`
+To push to `main` and trigger the workflow:
 
+```bash
+# Make changes
+git add .
+git commit -m "update: scheduler changes"
    > ⚠️ **Important:** The CD workflow uses `environment: dev`, so the `environment:dev` credential is **required**. The `ref:refs/heads/main` credential only matches jobs without an environment.
+# Push to main (or merge a PR)
+git push origin main
 
+# Check workflow status
+gh run list --workflow=cd.yml --limit 1
+```
 3. **Note the following values** (you'll need them for GitHub secrets):
+**Checkpoint:** Monitor the GitHub Actions run to confirm:
+- ✅ `deploy-infra` job completes (infrastructure deployed)
+- ✅ `build-image` job completes (image built and pushed)
+- ✅ `update-container-app` job completes (image deployed to Container App)
+- ✅ `smoke-test` job completes (Container App is healthy and events flowing)
    - `CLIENT_ID` — from the App Registration overview
    - `TENANT_ID` — from the App Registration overview
    - `SUBSCRIPTION_ID` — from your Azure subscription
@@ -78,36 +83,41 @@ GitHub Actions authenticates to Azure using OpenID Connect — no stored secrets
    ```bash
    az group create -n rg-iss-demo-dev -l eastus2
    ```
+   ### Step 1B: Automated Build & Push (via GitHub Actions CD Pipeline)
+> 🛡️ **Security note:** These are non-sensitive identifiers — the actual auth happens via OIDC federation. No passwords or client secrets needed!
+   The CD pipeline (`.github/workflows/cd.yml`) automatically:
+   1. **Deploys infrastructure** (ACR, Container App skeleton, Event Hubs, monitoring)
+   2. **Builds and pushes the Docker image** to ACR
+   3. **Updates the Container App** with the built image
+   4. **Runs smoke tests** to verify the deployment
 
-5. **Grant the app registration Owner role on the resource group:**
+   ✅ **No manual steps needed!** Push to `main` to trigger the CD workflow:
+## Step 1: Deploy Azure Resources ☁️ (~5-10 min)
    ```bash
-   az role assignment create \
-     --assignee <CLIENT_ID> \
-     --role Owner \
-     --scope /subscriptions/<SUBSCRIPTION_ID>/resourceGroups/rg-iss-demo-dev
+   git push origin main
    ```
 
-   > ⚠️ **Why Owner?** The Bicep deployment creates RBAC role assignments (Function App MI → Event Hubs Data Sender). The `Contributor` role cannot create role assignments — you need `Owner` or `Contributor` + `User Access Administrator`.
-
-### GitHub Secrets
-
-Add these secrets to the repository (Settings → Secrets and variables → Actions → New repository secret):
-
-| Secret Name              | Value                          |
-|--------------------------|--------------------------------|
-| `AZURE_CLIENT_ID`       | App Registration Client ID     |
-| `AZURE_TENANT_ID`       | Entra Tenant ID                |
-| `AZURE_SUBSCRIPTION_ID` | Azure Subscription ID          |
-
-> 🛡️ **Security note:** These are non-sensitive identifiers — the actual auth happens via OIDC federation. No passwords or client secrets needed!
-
-## Step 1: Deploy Azure Resources ☁️ (~5-10 min)
-
+   The CD pipeline will handle everything from infrastructure to running container.
 ### Option A: One-Click Portal Deployment (Easiest)
+   To push to `main` and trigger the workflow:
 
+   ```bash
+   # Make changes
+   git add .
+   git commit -m "update: scheduler changes"
 Click the "Deploy to Azure" button above. The portal will:
+   # Push to main (or merge a PR)
+   git push origin main
 1. Prompt for resource group and environment parameters
+   # Check workflow status
+   gh run list --workflow=cd.yml --limit 1
+   ```
 2. Provision Event Hubs, Container Registry, Monitoring, and Container App skeleton
+   **Checkpoint:** Monitor the GitHub Actions run to confirm:
+   - ✅ `deploy-infra` job completes (infrastructure deployed)
+   - ✅ `build-image` job completes (image built and pushed)
+   - ✅ `update-container-app` job completes (image deployed to Container App)
+   - ✅ `smoke-test` job completes (Container App is healthy and events flowing)
 3. Set up RBAC roles
 
 After deployment, follow **Step 1B** to build and push the container image.
@@ -210,7 +220,7 @@ Hit a snag? Here are the most common issues and their fixes:
 
 | Problem | Likely Cause | Solution |
 |---------|-------------|----------|
-| Container App shows no image | Image not pushed yet | Run `docker push acrissdev.azurecr.io/iss-demo:latest` and update the container app |
+| Container App shows no image | CD pipeline not yet run | Check GitHub Actions: `gh run list --workflow=cd.yml --limit 1` — ensure `build-image` and `update-container-app` jobs completed |
 | Container App not provisioning | Invalid image URI or ACR access | Verify ACR exists and image is in registry: `az acr repository list -n acrissdev` |
 | Container App shows stale image | Need to update deployment | Re-run `az containerapp update` with new image URI |
 | No events in Event Hub | Container not running or no logs | Check: `az containerapp logs show -n ca-iss-dev -g rg-iss-demo-dev` |
