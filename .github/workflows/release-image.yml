@@ -81,12 +81,16 @@ jobs:
             org.opencontainers.image.created=${{ github.event.release.created_at }}
 
       - name: Ensure GHCR package visibility is public
-        if: ${{ secrets.GHCR_VISIBILITY_TOKEN != '' }}
         env:
           GH_TOKEN: ${{ secrets.GHCR_VISIBILITY_TOKEN }}
           OWNER: ${{ github.repository_owner }}
           PACKAGE_NAME: ${{ github.event.repository.name }}
         run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "GHCR_VISIBILITY_TOKEN is not configured; skipping visibility update."
+            exit 0
+          fi
+
           PACKAGE_LOWER=$(echo "$PACKAGE_NAME" | tr '[:upper:]' '[:lower:]')
 
           if gh api -X PATCH "/orgs/$OWNER/packages/container/$PACKAGE_LOWER/visibility" -f visibility=public >/dev/null 2>&1; then
