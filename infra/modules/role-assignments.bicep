@@ -26,7 +26,7 @@ param acrResourceId string = ''
 var eventHubsDataSenderRoleId = '2b629674-e913-4c01-ae53-ef4638d8f975'
 
 @description('Built-in role definition ID for AcrPull.')
-var acrPullRoleId = '7f951dda-4ed3-4680-a7ca-6e2d8e0a6666'
+var acrPullRoleId = '7f951dda-4ed3-468d-8ac7-5cbf6c5e8b58'
 
 // ── Existing Resource Reference ─────────────────────────────────────────────
 
@@ -35,7 +35,6 @@ resource eventHubNamespace 'Microsoft.EventHub/namespaces@2024-01-01' existing =
   name: eventHubNamespaceName
 }
 
-@description('Reference to the existing Container Registry for scoping the AcrPull role assignment.')
 resource containerRegistry 'Microsoft.ContainerRegistry/registries@2023-07-01' existing = if (!empty(acrResourceId)) {
   name: last(split(acrResourceId, '/'))
 }
