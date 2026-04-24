@@ -18,6 +18,21 @@
 
 ---
 
+## Deploy To Azure
+
+<p align="center">
+  <a href="https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FTalesFromTheField%2Fiss-demo%2Fmain%2Finfra%2Fazuredeploy.json">
+    <img src="https://aka.ms/deploytoazurebutton" alt="Deploy to Azure">
+  </a>
+</p>
+
+The button provisions Azure infrastructure from `infra/main.bicep` (Event Hubs, Function App, monitoring, RBAC).
+
+After the template deployment finishes, deploy the Function App code and complete Fabric + Power BI setup using the
+[Deployment Guide](docs/deployment-guide.md).
+
+---
+
 ## 📺 Video Walkthrough
 
 Check out the full walkthrough on YouTube! 🎬

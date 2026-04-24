@@ -4,6 +4,30 @@
 
 This guide walks you through deploying the full ISS Demo stack: Azure infrastructure via Bicep, Microsoft Fabric real-time analytics, and a Power BI dashboard that tracks the International Space Station across the globe. Buckle up! 🛰️
 
+## One-Click Azure Infra Deployment
+
+Use the repository's Deploy to Azure button for portal-based provisioning of Azure infrastructure:
+
+[![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FTalesFromTheField%2Fiss-demo%2Fmain%2Finfra%2Fazuredeploy.json)
+
+This deployment provisions resources defined in `infra/main.bicep` (Event Hubs, Function App, monitoring, and RBAC).
+It does not publish the Function App code package. Complete Step 1A after template deployment.
+
+### Step 1A: Publish Function Code (after button deployment)
+
+```bash
+cd functions
+zip -r ../function-app.zip . -x "tests/*" "local.settings.json" "__pycache__/*"
+cd ..
+
+az functionapp deployment source config-zip \
+   --resource-group rg-iss-demo-dev \
+   --name func-iss-dev \
+   --src function-app.zip
+```
+
+If you deploy to a different environment name, update the Function App and resource group values accordingly.
+
 ## 📋 Prerequisites
 
 Before you begin, make sure you have:
