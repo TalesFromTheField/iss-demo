@@ -57,18 +57,12 @@ var effectiveImageUri = !empty(containerImageUri)
   ? containerImageUri 
   : 'ghcr.io/talesfromthefield/iss-demo:latest'
 
-resource eventHubNamespace 'Microsoft.EventHub/namespaces@2024-01-01' existing = if (empty(eventHubConnectionString)) {
-  name: eventHubs.outputs.namespaceName
-}
-
-resource eventHubRootManageRule 'Microsoft.EventHub/namespaces/authorizationRules@2024-01-01' existing = if (empty(eventHubConnectionString)) {
-  name: 'RootManageSharedAccessKey'
-  parent: eventHubNamespace
-}
+// Event Hubs namespace name is deterministic from environmentName in event-hubs module.
+var eventHubNamespaceName = 'evhns-iss-${environmentName}'
 
 var effectiveEventHubConnectionString = !empty(eventHubConnectionString)
   ? eventHubConnectionString
-  : eventHubRootManageRule!.listKeys().primaryConnectionString
+  : listKeys(resourceId('Microsoft.EventHub/namespaces/authorizationRules', eventHubNamespaceName, 'RootManageSharedAccessKey'), '2024-01-01').primaryConnectionString
 
 module containerApp 'modules/container-app.bicep' = {
   name: 'container-app'
@@ -89,8 +83,8 @@ module roleAssignments 'modules/role-assignments.bicep' = {
   name: 'role-assignments'
   params: {
     principalId: containerApp.outputs.containerAppPrincipalId
-    eventHubNamespaceResourceId: resourceId('Microsoft.EventHub/namespaces', eventHubs.outputs.namespaceName)
-    eventHubNamespaceName: eventHubs.outputs.namespaceName
+    eventHubNamespaceResourceId: resourceId('Microsoft.EventHub/namespaces', eventHubNamespaceName)
+    eventHubNamespaceName: eventHubNamespaceName
     acrResourceId: containerRegistry.outputs.registryResourceId
   }
 }
