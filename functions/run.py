@@ -12,6 +12,11 @@ from datetime import datetime, timezone
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from azure.eventhub import EventHubProducerClient
+from function_app import (
+    ISS_LOCATION_URL,
+    ASTRONAUTS_URL,
+    _fetch_with_retry,
+)
 
 # Setup logging
 logging.basicConfig(
@@ -19,14 +24,6 @@ logging.basicConfig(
     format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
 )
 logger = logging.getLogger(__name__)
-
-# Import the actual function logic from function_app
-# (Note: We can't use the @app decorators directly, so we'll import the core functions)
-from function_app import (
-    ISS_LOCATION_URL,
-    ASTRONAUTS_URL,
-    _fetch_with_retry,
-)
 
 # Environment configuration
 EVENT_HUB_CONNECTION_STRING = os.environ.get("EventHubConnection")
