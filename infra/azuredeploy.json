@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.42.1.51946",
-      "templateHash": "14198840818677824048"
+      "templateHash": "9348716198739043725"
     }
   },
   "parameters": {
@@ -20,6 +20,20 @@
       "defaultValue": "[resourceGroup().location]",
       "metadata": {
         "description": "Azure region for all resources."
+      }
+    },
+    "containerImageUri": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Container image URI (e.g., acrissdev.azurecr.io/iss-demo:latest or docker.io/org/iss-demo:latest)."
+      }
+    },
+    "eventHubConnectionString": {
+      "type": "securestring",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Event Hubs connection string (for container app environment)."
       }
     }
   },
@@ -184,7 +198,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.42.1.51946",
-              "templateHash": "5423335865516015300"
+              "templateHash": "346986307783547895"
             }
           },
           "parameters": {
@@ -204,21 +218,37 @@
               "type": "string",
               "defaultValue": "",
               "metadata": {
-                "description": "Name of the Function App (informational; used in alert display names)."
+                "description": "Name of the Function App (informational; for backward compatibility)."
               }
             },
             "functionAppResourceId": {
               "type": "string",
               "defaultValue": "",
               "metadata": {
-                "description": "Resource ID of the Function App to scope metric alerts against. When empty, alert rules are not deployed."
+                "description": "Resource ID of the Function App (for backward compatibility; used in alert display names)."
+              }
+            },
+            "containerAppName": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Name of the Container App (informational; used in alert display names)."
+              }
+            },
+            "containerAppResourceId": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Resource ID of the Container App to scope metric alerts against. When empty, alert rules are not deployed."
               }
             }
           },
           "variables": {
             "logAnalyticsName": "[format('law-iss-{0}', parameters('environmentName'))]",
             "appInsightsName": "[format('appi-iss-{0}', parameters('environmentName'))]",
-            "alertsEnabled": "[not(empty(parameters('functionAppResourceId')))]"
+            "effectiveAppResourceId": "[if(not(empty(parameters('containerAppResourceId'))), parameters('containerAppResourceId'), parameters('functionAppResourceId'))]",
+            "effectiveAppName": "[if(not(empty(parameters('containerAppName'))), parameters('containerAppName'), parameters('functionAppName'))]",
+            "alertsEnabled": "[not(empty(variables('effectiveAppResourceId')))]"
           },
           "resources": [
             {
@@ -263,19 +293,19 @@
               }
             },
             {
-              "condition": "[variables('alertsEnabled')]",
+              "condition": "[and(variables('alertsEnabled'), not(empty(parameters('functionAppResourceId'))))]",
               "type": "Microsoft.Insights/metricAlerts",
               "apiVersion": "2018-03-01",
               "name": "[format('alert-func-failures-{0}', parameters('environmentName'))]",
               "location": "global",
               "properties": {
-                "description": "[format('Function execution failures exceeded threshold (>5 in 5 min) for {0}.', if(not(empty(parameters('functionAppName'))), parameters('functionAppName'), 'Function App'))]",
+                "description": "[format('Function execution failures exceeded threshold (>5 in 5 min) for {0}.', variables('effectiveAppName'))]",
                 "severity": 2,
                 "enabled": true,
                 "evaluationFrequency": "PT1M",
                 "windowSize": "PT5M",
                 "scopes": [
-                  "[parameters('functionAppResourceId')]"
+                  "[variables('effectiveAppResourceId')]"
                 ],
                 "criteria": {
                   "odata.type": "Microsoft.Azure.Monitor.SingleResourceMultipleMetricCriteria",
@@ -309,19 +339,19 @@
               }
             },
             {
-              "condition": "[variables('alertsEnabled')]",
+              "condition": "[and(variables('alertsEnabled'), not(empty(parameters('functionAppResourceId'))))]",
               "type": "Microsoft.Insights/metricAlerts",
               "apiVersion": "2018-03-01",
               "name": "[format('alert-func-stopped-{0}', parameters('environmentName'))]",
               "location": "global",
               "properties": {
-                "description": "[format('No successful function executions detected in the last 10 minutes for {0}. The Function App may have stopped.', if(not(empty(parameters('functionAppName'))), parameters('functionAppName'), 'Function App'))]",
+                "description": "[format('No successful function executions detected in the last 10 minutes for {0}. The Function App may have stopped.', variables('effectiveAppName'))]",
                 "severity": 1,
                 "enabled": true,
                 "evaluationFrequency": "PT5M",
                 "windowSize": "PT10M",
                 "scopes": [
-                  "[parameters('functionAppResourceId')]"
+                  "[variables('effectiveAppResourceId')]"
                 ],
                 "criteria": {
                   "odata.type": "Microsoft.Azure.Monitor.SingleResourceMultipleMetricCriteria",
@@ -384,7 +414,154 @@
     {
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
-      "name": "function-app",
+      "name": "container-registry",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "environmentName": {
+            "value": "[parameters('environmentName')]"
+          },
+          "location": {
+            "value": "[parameters('location')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.42.1.51946",
+              "templateHash": "1504319138836839525"
+            }
+          },
+          "parameters": {
+            "environmentName": {
+              "type": "string",
+              "metadata": {
+                "description": "Environment name used for resource naming (e.g., dev, prod)."
+              }
+            },
+            "location": {
+              "type": "string",
+              "metadata": {
+                "description": "Azure region for the container registry."
+              }
+            }
+          },
+          "variables": {
+            "acrName": "[format('acriss{0}', parameters('environmentName'))]"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.ContainerRegistry/registries",
+              "apiVersion": "2023-07-01",
+              "name": "[variables('acrName')]",
+              "location": "[parameters('location')]",
+              "sku": {
+                "name": "Basic"
+              },
+              "properties": {
+                "adminUserEnabled": false,
+                "publicNetworkAccess": "Enabled",
+                "networkRuleBypassOptions": "AzureServices"
+              },
+              "metadata": {
+                "description": "Azure Container Registry for ISS Demo container images."
+              }
+            }
+          ],
+          "outputs": {
+            "registryName": {
+              "type": "string",
+              "metadata": {
+                "description": "The name of the container registry."
+              },
+              "value": "[variables('acrName')]"
+            },
+            "loginServer": {
+              "type": "string",
+              "metadata": {
+                "description": "The login server URL of the container registry."
+              },
+              "value": "[reference(resourceId('Microsoft.ContainerRegistry/registries', variables('acrName')), '2023-07-01').loginServer]"
+            },
+            "registryResourceId": {
+              "type": "string",
+              "metadata": {
+                "description": "The resource ID of the container registry."
+              },
+              "value": "[resourceId('Microsoft.ContainerRegistry/registries', variables('acrName'))]"
+            }
+          }
+        }
+      }
+    },
+    {
+      "condition": "[empty(parameters('eventHubConnectionString'))]",
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "get-eventhub-connstr",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "eventHubNamespaceName": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'event-hubs'), '2025-04-01').outputs.namespaceName.value]"
+          },
+          "resourceGroupName": {
+            "value": "[resourceGroup().name]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.42.1.51946",
+              "templateHash": "5716762982596857331"
+            }
+          },
+          "parameters": {
+            "eventHubNamespaceName": {
+              "type": "string",
+              "metadata": {
+                "description": "Name of the Event Hubs namespace."
+              }
+            },
+            "resourceGroupName": {
+              "type": "string",
+              "metadata": {
+                "description": "Name of the resource group (for querying existing resource)."
+              }
+            }
+          },
+          "resources": [],
+          "outputs": {
+            "connectionString": {
+              "type": "string",
+              "metadata": {
+                "description": "Primary connection string for the Event Hubs namespace."
+              },
+              "value": "[listKeys(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.EventHub/namespaces/authorizationRules', parameters('eventHubNamespaceName'), 'RootManageSharedAccessKey'), '2024-01-01').primaryConnectionString]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Resources/deployments', 'event-hubs')]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "container-app",
       "properties": {
         "expressionEvaluationOptions": {
           "scope": "inner"
@@ -397,9 +574,6 @@
           "location": {
             "value": "[parameters('location')]"
           },
-          "eventHubNamespaceFqdn": {
-            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'event-hubs'), '2025-04-01').outputs.namespaceFqdn.value]"
-          },
           "appInsightsConnectionString": {
             "value": "[reference(resourceId('Microsoft.Resources/deployments', 'monitoring'), '2025-04-01').outputs.appInsightsConnectionString.value]"
           },
@@ -408,7 +582,9 @@
           },
           "astronautsHubName": {
             "value": "[reference(resourceId('Microsoft.Resources/deployments', 'event-hubs'), '2025-04-01').outputs.astronautsHubName.value]"
-          }
+          },
+          "containerImageUri": "[if(not(empty(parameters('containerImageUri'))), createObject('value', parameters('containerImageUri')), createObject('value', format('{0}/iss-demo:latest', reference(resourceId('Microsoft.Resources/deployments', 'container-registry'), '2025-04-01').outputs.loginServer.value)))]",
+          "eventHubConnectionString": "[if(not(empty(parameters('eventHubConnectionString'))), createObject('value', parameters('eventHubConnectionString')), createObject('value', reference(resourceId('Microsoft.Resources/deployments', 'get-eventhub-connstr'), '2025-04-01').outputs.connectionString.value))]"
         },
         "template": {
           "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
@@ -417,7 +593,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.42.1.51946",
-              "templateHash": "7654913681764845127"
+              "templateHash": "3633955337297777757"
             }
           },
           "parameters": {
@@ -431,12 +607,6 @@
               "type": "string",
               "metadata": {
                 "description": "Azure region for all resources."
-              }
-            },
-            "eventHubNamespaceFqdn": {
-              "type": "string",
-              "metadata": {
-                "description": "Fully qualified domain name of the Event Hubs namespace (e.g., evhns-iss-dev.servicebus.windows.net)."
               }
             },
             "appInsightsConnectionString": {
@@ -458,362 +628,135 @@
               "metadata": {
                 "description": "Name of the astronauts Event Hub."
               }
+            },
+            "containerImageUri": {
+              "type": "string",
+              "metadata": {
+                "description": "Container image URI (e.g., acrissdev.azurecr.io/iss-demo:latest)."
+              }
+            },
+            "eventHubConnectionString": {
+              "type": "securestring",
+              "metadata": {
+                "description": "Event Hubs namespace connection string (for event publishing)."
+              }
             }
           },
           "variables": {
-            "storageAccountName": "[format('stissf{0}', parameters('environmentName'))]",
-            "appServicePlanName": "[format('asp-iss-{0}', parameters('environmentName'))]",
-            "functionAppName": "[format('func-iss-{0}', parameters('environmentName'))]"
+            "containerAppEnvName": "[format('cae-iss-{0}', parameters('environmentName'))]",
+            "containerAppName": "[format('ca-iss-{0}', parameters('environmentName'))]",
+            "logAnalyticsWorkspaceName": "[format('law-iss-{0}', parameters('environmentName'))]"
           },
           "resources": [
             {
-              "type": "Microsoft.Storage/storageAccounts",
-              "apiVersion": "2023-05-01",
-              "name": "[variables('storageAccountName')]",
+              "type": "Microsoft.App/managedEnvironments",
+              "apiVersion": "2024-03-01",
+              "name": "[variables('containerAppEnvName')]",
               "location": "[parameters('location')]",
-              "sku": {
-                "name": "Standard_LRS"
-              },
-              "kind": "StorageV2",
               "properties": {
-                "supportsHttpsTrafficOnly": true,
-                "minimumTlsVersion": "TLS1_2",
-                "allowBlobPublicAccess": false
+                "appLogsConfiguration": {
+                  "destination": "log-analytics",
+                  "logAnalyticsConfiguration": {
+                    "customerId": "[reference(resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsWorkspaceName')), '2023-09-01').customerId]",
+                    "sharedKey": "[listKeys(resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsWorkspaceName')), '2023-09-01').primarySharedKey]"
+                  }
+                }
               },
               "metadata": {
-                "description": "Storage account used by the Functions runtime for triggers, logging, and state."
+                "description": "Container App Environment for ISS Demo."
               }
             },
             {
-              "type": "Microsoft.Web/serverfarms",
-              "apiVersion": "2023-12-01",
-              "name": "[variables('appServicePlanName')]",
+              "type": "Microsoft.App/containerApps",
+              "apiVersion": "2024-03-01",
+              "name": "[variables('containerAppName')]",
               "location": "[parameters('location')]",
-              "sku": {
-                "name": "Y1",
-                "tier": "Dynamic"
-              },
-              "kind": "linux",
-              "properties": {
-                "reserved": true
-              },
-              "metadata": {
-                "description": "Consumption (Y1) App Service Plan for the Function App."
-              }
-            },
-            {
-              "type": "Microsoft.Web/sites",
-              "apiVersion": "2023-12-01",
-              "name": "[variables('functionAppName')]",
-              "location": "[parameters('location')]",
-              "kind": "functionapp,linux",
               "identity": {
                 "type": "SystemAssigned"
               },
               "properties": {
-                "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', variables('appServicePlanName'))]",
-                "httpsOnly": true,
-                "siteConfig": {
-                  "linuxFxVersion": "Python|3.11",
-                  "appSettings": [
+                "environmentId": "[resourceId('Microsoft.App/managedEnvironments', variables('containerAppEnvName'))]",
+                "configuration": {},
+                "template": {
+                  "containers": [
                     {
-                      "name": "EventHubConnection__fullyQualifiedNamespace",
-                      "value": "[parameters('eventHubNamespaceFqdn')]"
-                    },
-                    {
-                      "name": "IssLocationHubName",
-                      "value": "[parameters('issLocationHubName')]"
-                    },
-                    {
-                      "name": "AstronautsHubName",
-                      "value": "[parameters('astronautsHubName')]"
-                    },
-                    {
-                      "name": "FUNCTIONS_WORKER_RUNTIME",
-                      "value": "python"
-                    },
-                    {
-                      "name": "FUNCTIONS_EXTENSION_VERSION",
-                      "value": "~4"
-                    },
-                    {
-                      "name": "APPLICATIONINSIGHTS_CONNECTION_STRING",
-                      "value": "[parameters('appInsightsConnectionString')]"
-                    },
-                    {
-                      "name": "AzureWebJobsStorage",
-                      "value": "[format('DefaultEndpointsProtocol=https;AccountName={0};EndpointSuffix={1};AccountKey={2}', variables('storageAccountName'), environment().suffixes.storage, listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')), '2023-05-01').keys[0].value)]"
+                      "image": "[parameters('containerImageUri')]",
+                      "name": "iss-demo-scheduler",
+                      "env": [
+                        {
+                          "name": "EventHubConnection",
+                          "value": "[parameters('eventHubConnectionString')]"
+                        },
+                        {
+                          "name": "IssLocationHubName",
+                          "value": "[parameters('issLocationHubName')]"
+                        },
+                        {
+                          "name": "AstronautsHubName",
+                          "value": "[parameters('astronautsHubName')]"
+                        },
+                        {
+                          "name": "APPLICATIONINSIGHTS_CONNECTION_STRING",
+                          "value": "[parameters('appInsightsConnectionString')]"
+                        }
+                      ],
+                      "resources": {
+                        "cpu": "[json('0.5')]",
+                        "memory": "1Gi"
+                      }
                     }
-                  ]
+                  ],
+                  "scale": {
+                    "minReplicas": 1,
+                    "maxReplicas": 1
+                  }
                 }
               },
               "dependsOn": [
-                "[resourceId('Microsoft.Web/serverfarms', variables('appServicePlanName'))]",
-                "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]"
+                "[resourceId('Microsoft.App/managedEnvironments', variables('containerAppEnvName'))]"
               ],
               "metadata": {
-                "description": "Linux Python 3.11 Function App with system-assigned Managed Identity."
+                "description": "Container App running the ISS Demo scheduler."
               }
             }
           ],
           "outputs": {
-            "functionAppName": {
+            "containerAppName": {
               "type": "string",
               "metadata": {
-                "description": "The name of the Function App resource."
+                "description": "The name of the Container App."
               },
-              "value": "[variables('functionAppName')]"
+              "value": "[variables('containerAppName')]"
             },
-            "functionAppPrincipalId": {
+            "containerAppPrincipalId": {
               "type": "string",
               "metadata": {
-                "description": "The principal ID of the Function App system-assigned Managed Identity (for RBAC assignments)."
+                "description": "The principal ID of the Container App system-assigned Managed Identity."
               },
-              "value": "[reference(resourceId('Microsoft.Web/sites', variables('functionAppName')), '2023-12-01', 'full').identity.principalId]"
+              "value": "[reference(resourceId('Microsoft.App/containerApps', variables('containerAppName')), '2024-03-01', 'full').identity.principalId]"
             },
-            "functionAppResourceId": {
+            "containerAppResourceId": {
               "type": "string",
               "metadata": {
-                "description": "The resource ID of the Function App."
+                "description": "The resource ID of the Container App."
               },
-              "value": "[resourceId('Microsoft.Web/sites', variables('functionAppName'))]"
+              "value": "[resourceId('Microsoft.App/containerApps', variables('containerAppName'))]"
+            },
+            "containerAppFqdn": {
+              "type": "string",
+              "metadata": {
+                "description": "The FQDN of the Container App (if ingress is external)."
+              },
+              "value": "[reference(resourceId('Microsoft.App/containerApps', variables('containerAppName')), '2024-03-01').configuration.ingress.fqdn]"
             }
           }
         }
       },
       "dependsOn": [
+        "[resourceId('Microsoft.Resources/deployments', 'container-registry')]",
         "[resourceId('Microsoft.Resources/deployments', 'event-hubs')]",
+        "[resourceId('Microsoft.Resources/deployments', 'get-eventhub-connstr')]",
         "[resourceId('Microsoft.Resources/deployments', 'monitoring')]"
-      ]
-    },
-    {
-      "type": "Microsoft.Resources/deployments",
-      "apiVersion": "2025-04-01",
-      "name": "monitoring-alerts",
-      "properties": {
-        "expressionEvaluationOptions": {
-          "scope": "inner"
-        },
-        "mode": "Incremental",
-        "parameters": {
-          "environmentName": {
-            "value": "[parameters('environmentName')]"
-          },
-          "location": {
-            "value": "[parameters('location')]"
-          },
-          "functionAppName": {
-            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'function-app'), '2025-04-01').outputs.functionAppName.value]"
-          },
-          "functionAppResourceId": {
-            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'function-app'), '2025-04-01').outputs.functionAppResourceId.value]"
-          }
-        },
-        "template": {
-          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
-          "contentVersion": "1.0.0.0",
-          "metadata": {
-            "_generator": {
-              "name": "bicep",
-              "version": "0.42.1.51946",
-              "templateHash": "5423335865516015300"
-            }
-          },
-          "parameters": {
-            "environmentName": {
-              "type": "string",
-              "metadata": {
-                "description": "Environment name used for resource naming (e.g. dev, staging, prod)."
-              }
-            },
-            "location": {
-              "type": "string",
-              "metadata": {
-                "description": "Azure region for all resources in this module."
-              }
-            },
-            "functionAppName": {
-              "type": "string",
-              "defaultValue": "",
-              "metadata": {
-                "description": "Name of the Function App (informational; used in alert display names)."
-              }
-            },
-            "functionAppResourceId": {
-              "type": "string",
-              "defaultValue": "",
-              "metadata": {
-                "description": "Resource ID of the Function App to scope metric alerts against. When empty, alert rules are not deployed."
-              }
-            }
-          },
-          "variables": {
-            "logAnalyticsName": "[format('law-iss-{0}', parameters('environmentName'))]",
-            "appInsightsName": "[format('appi-iss-{0}', parameters('environmentName'))]",
-            "alertsEnabled": "[not(empty(parameters('functionAppResourceId')))]"
-          },
-          "resources": [
-            {
-              "type": "Microsoft.OperationalInsights/workspaces",
-              "apiVersion": "2023-09-01",
-              "name": "[variables('logAnalyticsName')]",
-              "location": "[parameters('location')]",
-              "properties": {
-                "sku": {
-                  "name": "PerGB2018"
-                },
-                "retentionInDays": 30,
-                "features": {
-                  "enableLogAccessUsingOnlyResourcePermissions": true
-                },
-                "publicNetworkAccessForIngestion": "Enabled",
-                "publicNetworkAccessForQuery": "Enabled"
-              },
-              "metadata": {
-                "description": "Log Analytics Workspace that backs Application Insights."
-              }
-            },
-            {
-              "type": "Microsoft.Insights/components",
-              "apiVersion": "2020-02-02",
-              "name": "[variables('appInsightsName')]",
-              "location": "[parameters('location')]",
-              "kind": "web",
-              "properties": {
-                "Application_Type": "web",
-                "WorkspaceResourceId": "[resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsName'))]",
-                "RetentionInDays": 30,
-                "IngestionMode": "LogAnalytics",
-                "publicNetworkAccessForIngestion": "Enabled",
-                "publicNetworkAccessForQuery": "Enabled"
-              },
-              "dependsOn": [
-                "[resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsName'))]"
-              ],
-              "metadata": {
-                "description": "Application Insights instance connected to the Log Analytics Workspace."
-              }
-            },
-            {
-              "condition": "[variables('alertsEnabled')]",
-              "type": "Microsoft.Insights/metricAlerts",
-              "apiVersion": "2018-03-01",
-              "name": "[format('alert-func-failures-{0}', parameters('environmentName'))]",
-              "location": "global",
-              "properties": {
-                "description": "[format('Function execution failures exceeded threshold (>5 in 5 min) for {0}.', if(not(empty(parameters('functionAppName'))), parameters('functionAppName'), 'Function App'))]",
-                "severity": 2,
-                "enabled": true,
-                "evaluationFrequency": "PT1M",
-                "windowSize": "PT5M",
-                "scopes": [
-                  "[parameters('functionAppResourceId')]"
-                ],
-                "criteria": {
-                  "odata.type": "Microsoft.Azure.Monitor.SingleResourceMultipleMetricCriteria",
-                  "allOf": [
-                    {
-                      "name": "FunctionExecutionFailures",
-                      "metricName": "FunctionExecutionCount",
-                      "metricNamespace": "Microsoft.Web/sites",
-                      "operator": "GreaterThan",
-                      "threshold": 5,
-                      "timeAggregation": "Total",
-                      "dimensions": [
-                        {
-                          "name": "FunctionExecutionStatus",
-                          "operator": "Include",
-                          "values": [
-                            "Failed"
-                          ]
-                        }
-                      ],
-                      "criterionType": "StaticThresholdCriterion"
-                    }
-                  ]
-                },
-                "autoMitigate": true,
-                "targetResourceType": "Microsoft.Web/sites",
-                "targetResourceRegion": "[parameters('location')]"
-              },
-              "metadata": {
-                "description": "Fires when Function App execution failures exceed 5 within a 5-minute window."
-              }
-            },
-            {
-              "condition": "[variables('alertsEnabled')]",
-              "type": "Microsoft.Insights/metricAlerts",
-              "apiVersion": "2018-03-01",
-              "name": "[format('alert-func-stopped-{0}', parameters('environmentName'))]",
-              "location": "global",
-              "properties": {
-                "description": "[format('No successful function executions detected in the last 10 minutes for {0}. The Function App may have stopped.', if(not(empty(parameters('functionAppName'))), parameters('functionAppName'), 'Function App'))]",
-                "severity": 1,
-                "enabled": true,
-                "evaluationFrequency": "PT5M",
-                "windowSize": "PT10M",
-                "scopes": [
-                  "[parameters('functionAppResourceId')]"
-                ],
-                "criteria": {
-                  "odata.type": "Microsoft.Azure.Monitor.SingleResourceMultipleMetricCriteria",
-                  "allOf": [
-                    {
-                      "name": "ZeroSuccessfulExecutions",
-                      "metricName": "FunctionExecutionCount",
-                      "metricNamespace": "Microsoft.Web/sites",
-                      "operator": "LessThanOrEqual",
-                      "threshold": 0,
-                      "timeAggregation": "Total",
-                      "dimensions": [
-                        {
-                          "name": "FunctionExecutionStatus",
-                          "operator": "Include",
-                          "values": [
-                            "Completed"
-                          ]
-                        }
-                      ],
-                      "criterionType": "StaticThresholdCriterion"
-                    }
-                  ]
-                },
-                "autoMitigate": true,
-                "targetResourceType": "Microsoft.Web/sites",
-                "targetResourceRegion": "[parameters('location')]"
-              },
-              "metadata": {
-                "description": "Fires when there are zero successful Function executions over a 10-minute window, indicating the Function App may have stopped."
-              }
-            }
-          ],
-          "outputs": {
-            "appInsightsConnectionString": {
-              "type": "string",
-              "metadata": {
-                "description": "Application Insights connection string for the Function App configuration."
-              },
-              "value": "[reference(resourceId('Microsoft.Insights/components', variables('appInsightsName')), '2020-02-02').ConnectionString]"
-            },
-            "appInsightsInstrumentationKey": {
-              "type": "string",
-              "metadata": {
-                "description": "Application Insights instrumentation key (legacy; prefer connection string)."
-              },
-              "value": "[reference(resourceId('Microsoft.Insights/components', variables('appInsightsName')), '2020-02-02').InstrumentationKey]"
-            },
-            "logAnalyticsWorkspaceId": {
-              "type": "string",
-              "metadata": {
-                "description": "Resource ID of the Log Analytics Workspace."
-              },
-              "value": "[resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsName'))]"
-            }
-          }
-        }
-      },
-      "dependsOn": [
-        "[resourceId('Microsoft.Resources/deployments', 'function-app')]"
       ]
     },
     {
@@ -827,13 +770,16 @@
         "mode": "Incremental",
         "parameters": {
           "principalId": {
-            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'function-app'), '2025-04-01').outputs.functionAppPrincipalId.value]"
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'container-app'), '2025-04-01').outputs.containerAppPrincipalId.value]"
           },
           "eventHubNamespaceResourceId": {
             "value": "[resourceId('Microsoft.EventHub/namespaces', reference(resourceId('Microsoft.Resources/deployments', 'event-hubs'), '2025-04-01').outputs.namespaceName.value)]"
           },
           "eventHubNamespaceName": {
             "value": "[reference(resourceId('Microsoft.Resources/deployments', 'event-hubs'), '2025-04-01').outputs.namespaceName.value]"
+          },
+          "acrResourceId": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'container-registry'), '2025-04-01').outputs.registryResourceId.value]"
           }
         },
         "template": {
@@ -843,20 +789,20 @@
             "_generator": {
               "name": "bicep",
               "version": "0.42.1.51946",
-              "templateHash": "4540307317552270859"
+              "templateHash": "12812885888210278595"
             }
           },
           "parameters": {
             "principalId": {
               "type": "string",
               "metadata": {
-                "description": "The principal ID of the Function App system-assigned Managed Identity."
+                "description": "The principal ID of the Container App system-assigned Managed Identity."
               }
             },
             "eventHubNamespaceResourceId": {
               "type": "string",
               "metadata": {
-                "description": "Full resource ID of the Event Hubs namespace (used for scoping)."
+                "description": "Full resource ID of the Event Hubs namespace (used for scoping, kept for backward compatibility)."
               }
             },
             "eventHubNamespaceName": {
@@ -864,10 +810,18 @@
               "metadata": {
                 "description": "Name of the existing Event Hubs namespace."
               }
+            },
+            "acrResourceId": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Full resource ID of the Azure Container Registry (optional)."
+              }
             }
           },
           "variables": {
-            "eventHubsDataSenderRoleId": "2b629674-e913-4c01-ae53-ef4638d8f975"
+            "eventHubsDataSenderRoleId": "2b629674-e913-4c01-ae53-ef4638d8f975",
+            "acrPullRoleId": "7f951dda-4ed3-4680-a7ca-6e2d8e0a6666"
           },
           "resources": [
             {
@@ -881,24 +835,47 @@
                 "principalType": "ServicePrincipal"
               },
               "metadata": {
-                "description": "Assigns the Azure Event Hubs Data Sender role to the Function App managed identity, scoped to the Event Hubs namespace."
+                "description": "Assigns the Azure Event Hubs Data Sender role to the Container App managed identity, scoped to the Event Hubs namespace."
+              }
+            },
+            {
+              "condition": "[not(empty(parameters('acrResourceId')))]",
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.ContainerRegistry/registries', last(split(parameters('acrResourceId'), '/')))]",
+              "name": "[guid(parameters('acrResourceId'), parameters('principalId'), variables('acrPullRoleId'))]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('acrPullRoleId'))]",
+                "principalId": "[parameters('principalId')]",
+                "principalType": "ServicePrincipal"
+              },
+              "metadata": {
+                "description": "Assigns the AcrPull role to the Container App managed identity, scoped to the Container Registry."
               }
             }
           ],
           "outputs": {
-            "roleAssignmentId": {
+            "ehRoleAssignmentId": {
               "type": "string",
               "metadata": {
-                "description": "The resource ID of the role assignment."
+                "description": "The resource ID of the Event Hubs role assignment."
               },
               "value": "[extensionResourceId(resourceId('Microsoft.EventHub/namespaces', parameters('eventHubNamespaceName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.EventHub/namespaces', parameters('eventHubNamespaceName')), parameters('principalId'), variables('eventHubsDataSenderRoleId')))]"
+            },
+            "acrRoleAssignmentId": {
+              "type": "string",
+              "metadata": {
+                "description": "The resource ID of the ACR pull role assignment (if ACR provided)."
+              },
+              "value": "[if(not(empty(parameters('acrResourceId'))), extensionResourceId(resourceId('Microsoft.ContainerRegistry/registries', last(split(parameters('acrResourceId'), '/'))), 'Microsoft.Authorization/roleAssignments', guid(parameters('acrResourceId'), parameters('principalId'), variables('acrPullRoleId'))), '')]"
             }
           }
         }
       },
       "dependsOn": [
-        "[resourceId('Microsoft.Resources/deployments', 'event-hubs')]",
-        "[resourceId('Microsoft.Resources/deployments', 'function-app')]"
+        "[resourceId('Microsoft.Resources/deployments', 'container-app')]",
+        "[resourceId('Microsoft.Resources/deployments', 'container-registry')]",
+        "[resourceId('Microsoft.Resources/deployments', 'event-hubs')]"
       ]
     }
   ],
@@ -910,12 +887,26 @@
       },
       "value": "[reference(resourceId('Microsoft.Resources/deployments', 'event-hubs'), '2025-04-01').outputs.namespaceFqdn.value]"
     },
-    "functionAppName": {
+    "containerAppName": {
       "type": "string",
       "metadata": {
-        "description": "Name of the deployed Function App."
+        "description": "Name of the deployed Container App."
       },
-      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'function-app'), '2025-04-01').outputs.functionAppName.value]"
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'container-app'), '2025-04-01').outputs.containerAppName.value]"
+    },
+    "containerImageUri": {
+      "type": "string",
+      "metadata": {
+        "description": "Container image URI deployed."
+      },
+      "value": "[if(not(empty(parameters('containerImageUri'))), parameters('containerImageUri'), format('{0}/iss-demo:latest', reference(resourceId('Microsoft.Resources/deployments', 'container-registry'), '2025-04-01').outputs.loginServer.value))]"
+    },
+    "acrLoginServer": {
+      "type": "string",
+      "metadata": {
+        "description": "Container Registry login server."
+      },
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'container-registry'), '2025-04-01').outputs.loginServer.value]"
     }
   }
 }
