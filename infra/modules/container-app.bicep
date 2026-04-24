@@ -130,6 +130,3 @@ output containerAppPrincipalId string = containerApp.identity.principalId
 
 @description('The resource ID of the Container App.')
 output containerAppResourceId string = containerApp.id
-
-@description('The FQDN of the Container App (if ingress is external).')
-output containerAppFqdn string = containerApp.properties.configuration.ingress.fqdn

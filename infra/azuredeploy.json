@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.42.1.51946",
-      "templateHash": "2750060080688460517"
+      "templateHash": "13158845838899633837"
     }
   },
   "parameters": {
@@ -550,7 +550,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.42.1.51946",
-              "templateHash": "9635411350825633612"
+              "templateHash": "10390013278317053308"
             }
           },
           "parameters": {
@@ -706,13 +706,6 @@
                 "description": "The resource ID of the Container App."
               },
               "value": "[resourceId('Microsoft.App/containerApps', variables('containerAppName'))]"
-            },
-            "containerAppFqdn": {
-              "type": "string",
-              "metadata": {
-                "description": "The FQDN of the Container App (if ingress is external)."
-              },
-              "value": "[reference(resourceId('Microsoft.App/containerApps', variables('containerAppName')), '2024-03-01').configuration.ingress.fqdn]"
             }
           }
         }
