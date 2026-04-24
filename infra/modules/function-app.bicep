@@ -27,9 +27,12 @@ param astronautsHubName string = 'astronauts'
 // ── Variables ───────────────────────────────────────────────────────────────
 
 // Storage account names must be 3-24 characters, lowercase alphanumeric only.
-var storageAccountName = 'stissf${environmentName}'
-var appServicePlanName = 'asp-iss-${environmentName}'
-var functionAppName    = 'func-iss-${environmentName}'
+var normalizedEnvironmentName = toLower(replace(replace(replace(environmentName, ' ', '-'), '_', '-'), '.', '-'))
+var envToken = replace(normalizedEnvironmentName, '-', '')
+var storageSuffix = take(uniqueString(subscription().id, resourceGroup().id, environmentName), 6)
+var storageAccountName = take('stissf${envToken}${storageSuffix}', 24)
+var appServicePlanName = 'asp-iss-${normalizedEnvironmentName}'
+var functionAppName    = 'func-iss-${normalizedEnvironmentName}'
 
 // ── Storage Account (Functions runtime) ─────────────────────────────────────
 

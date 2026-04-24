@@ -26,8 +26,9 @@ param containerAppResourceId string = ''
 
 // ── Variables ───────────────────────────────────────────────────────────────
 
-var logAnalyticsName = 'law-iss-${environmentName}'
-var appInsightsName = 'appi-iss-${environmentName}'
+var normalizedEnvironmentName = toLower(replace(replace(replace(environmentName, ' ', '-'), '_', '-'), '.', '-'))
+var logAnalyticsName = 'law-iss-${normalizedEnvironmentName}'
+var appInsightsName = 'appi-iss-${normalizedEnvironmentName}'
 
 // Use Container App resource ID if provided, otherwise fall back to Function App
 var effectiveAppResourceId = !empty(containerAppResourceId) ? containerAppResourceId : functionAppResourceId
@@ -75,7 +76,7 @@ resource appInsights 'Microsoft.Insights/components@2020-02-02' = {
 
 @description('Fires when Function App execution failures exceed 5 within a 5-minute window.')
 resource failureAlert 'Microsoft.Insights/metricAlerts@2018-03-01' = if (alertsEnabled && !empty(functionAppResourceId)) {
-  name: 'alert-func-failures-${environmentName}'
+  name: 'alert-func-failures-${normalizedEnvironmentName}'
   location: 'global'
   properties: {
     description: 'Function execution failures exceeded threshold (>5 in 5 min) for ${effectiveAppName}.'
@@ -119,7 +120,7 @@ resource failureAlert 'Microsoft.Insights/metricAlerts@2018-03-01' = if (alertsE
 
 @description('Fires when there are zero successful Function executions over a 10-minute window, indicating the Function App may have stopped.')
 resource stoppedAlert 'Microsoft.Insights/metricAlerts@2018-03-01' = if (alertsEnabled && !empty(functionAppResourceId)) {
-  name: 'alert-func-stopped-${environmentName}'
+  name: 'alert-func-stopped-${normalizedEnvironmentName}'
   location: 'global'
   properties: {
     description: 'No successful function executions detected in the last 10 minutes for ${effectiveAppName}. The Function App may have stopped.'

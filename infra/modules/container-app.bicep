@@ -33,9 +33,10 @@ param eventHubConnectionString string = ''
 
 // ── Variables ───────────────────────────────────────────────────────────────
 
-var containerAppEnvName = 'cae-iss-${environmentName}'
-var containerAppName = 'ca-iss-${environmentName}'
-var logAnalyticsWorkspaceName = 'law-iss-${environmentName}'
+var normalizedEnvironmentName = toLower(replace(replace(replace(environmentName, ' ', '-'), '_', '-'), '.', '-'))
+var containerAppEnvName = 'cae-iss-${normalizedEnvironmentName}'
+var containerAppName = 'ca-iss-${normalizedEnvironmentName}'
+var logAnalyticsWorkspaceName = 'law-iss-${normalizedEnvironmentName}'
 var effectiveEventHubConnectionString = !empty(eventHubConnectionString)
   ? eventHubConnectionString
   : listKeys(resourceId('Microsoft.EventHub/namespaces/authorizationRules', eventHubNamespaceName, 'RootManageSharedAccessKey'), '2024-01-01').primaryConnectionString

@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.42.1.51946",
-      "templateHash": "5729198988749554837"
+      "templateHash": "2750060080688460517"
     }
   },
   "parameters": {
@@ -38,6 +38,7 @@
     }
   },
   "variables": {
+    "normalizedEnvironmentName": "[toLower(replace(replace(replace(parameters('environmentName'), ' ', '-'), '_', '-'), '.', '-'))]",
     "effectiveImageUri": "[if(not(empty(parameters('containerImageUri'))), parameters('containerImageUri'), 'ghcr.io/talesfromthefield/iss-demo:latest')]"
   },
   "resources": [
@@ -52,7 +53,7 @@
         "mode": "Incremental",
         "parameters": {
           "environmentName": {
-            "value": "[parameters('environmentName')]"
+            "value": "[variables('normalizedEnvironmentName')]"
           },
           "location": {
             "value": "[parameters('location')]"
@@ -189,7 +190,7 @@
         "mode": "Incremental",
         "parameters": {
           "environmentName": {
-            "value": "[parameters('environmentName')]"
+            "value": "[variables('normalizedEnvironmentName')]"
           },
           "location": {
             "value": "[parameters('location')]"
@@ -202,7 +203,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.42.1.51946",
-              "templateHash": "346986307783547895"
+              "templateHash": "3139035333357774440"
             }
           },
           "parameters": {
@@ -248,8 +249,9 @@
             }
           },
           "variables": {
-            "logAnalyticsName": "[format('law-iss-{0}', parameters('environmentName'))]",
-            "appInsightsName": "[format('appi-iss-{0}', parameters('environmentName'))]",
+            "normalizedEnvironmentName": "[toLower(replace(replace(replace(parameters('environmentName'), ' ', '-'), '_', '-'), '.', '-'))]",
+            "logAnalyticsName": "[format('law-iss-{0}', variables('normalizedEnvironmentName'))]",
+            "appInsightsName": "[format('appi-iss-{0}', variables('normalizedEnvironmentName'))]",
             "effectiveAppResourceId": "[if(not(empty(parameters('containerAppResourceId'))), parameters('containerAppResourceId'), parameters('functionAppResourceId'))]",
             "effectiveAppName": "[if(not(empty(parameters('containerAppName'))), parameters('containerAppName'), parameters('functionAppName'))]",
             "alertsEnabled": "[not(empty(variables('effectiveAppResourceId')))]"
@@ -300,7 +302,7 @@
               "condition": "[and(variables('alertsEnabled'), not(empty(parameters('functionAppResourceId'))))]",
               "type": "Microsoft.Insights/metricAlerts",
               "apiVersion": "2018-03-01",
-              "name": "[format('alert-func-failures-{0}', parameters('environmentName'))]",
+              "name": "[format('alert-func-failures-{0}', variables('normalizedEnvironmentName'))]",
               "location": "global",
               "properties": {
                 "description": "[format('Function execution failures exceeded threshold (>5 in 5 min) for {0}.', variables('effectiveAppName'))]",
@@ -346,7 +348,7 @@
               "condition": "[and(variables('alertsEnabled'), not(empty(parameters('functionAppResourceId'))))]",
               "type": "Microsoft.Insights/metricAlerts",
               "apiVersion": "2018-03-01",
-              "name": "[format('alert-func-stopped-{0}', parameters('environmentName'))]",
+              "name": "[format('alert-func-stopped-{0}', variables('normalizedEnvironmentName'))]",
               "location": "global",
               "properties": {
                 "description": "[format('No successful function executions detected in the last 10 minutes for {0}. The Function App may have stopped.', variables('effectiveAppName'))]",
@@ -426,7 +428,7 @@
         "mode": "Incremental",
         "parameters": {
           "environmentName": {
-            "value": "[parameters('environmentName')]"
+            "value": "[variables('normalizedEnvironmentName')]"
           },
           "location": {
             "value": "[parameters('location')]"
@@ -517,7 +519,7 @@
         "mode": "Incremental",
         "parameters": {
           "environmentName": {
-            "value": "[parameters('environmentName')]"
+            "value": "[variables('normalizedEnvironmentName')]"
           },
           "location": {
             "value": "[parameters('location')]"
@@ -548,7 +550,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.42.1.51946",
-              "templateHash": "7420840894161871663"
+              "templateHash": "9635411350825633612"
             }
           },
           "parameters": {
@@ -605,9 +607,10 @@
             }
           },
           "variables": {
-            "containerAppEnvName": "[format('cae-iss-{0}', parameters('environmentName'))]",
-            "containerAppName": "[format('ca-iss-{0}', parameters('environmentName'))]",
-            "logAnalyticsWorkspaceName": "[format('law-iss-{0}', parameters('environmentName'))]"
+            "normalizedEnvironmentName": "[toLower(replace(replace(replace(parameters('environmentName'), ' ', '-'), '_', '-'), '.', '-'))]",
+            "containerAppEnvName": "[format('cae-iss-{0}', variables('normalizedEnvironmentName'))]",
+            "containerAppName": "[format('ca-iss-{0}', variables('normalizedEnvironmentName'))]",
+            "logAnalyticsWorkspaceName": "[format('law-iss-{0}', variables('normalizedEnvironmentName'))]"
           },
           "resources": [
             {

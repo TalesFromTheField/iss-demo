@@ -20,12 +20,15 @@ param containerImageUri string = ''
 @secure()
 param eventHubConnectionString string = ''
 
+// Normalize user-provided environment names for resource naming safety.
+var normalizedEnvironmentName = toLower(replace(replace(replace(environmentName, ' ', '-'), '_', '-'), '.', '-'))
+
 // ── Module: Event Hubs ──────────────────────────────────────────────────────
 
 module eventHubs 'modules/event-hubs.bicep' = {
   name: 'event-hubs'
   params: {
-    environmentName: environmentName
+    environmentName: normalizedEnvironmentName
     location: location
   }
 }
@@ -35,7 +38,7 @@ module eventHubs 'modules/event-hubs.bicep' = {
 module monitoring 'modules/monitoring.bicep' = {
   name: 'monitoring'
   params: {
-    environmentName: environmentName
+    environmentName: normalizedEnvironmentName
     location: location
   }
 }
@@ -45,7 +48,7 @@ module monitoring 'modules/monitoring.bicep' = {
 module containerRegistry 'modules/container-registry.bicep' = {
   name: 'container-registry'
   params: {
-    environmentName: environmentName
+    environmentName: normalizedEnvironmentName
     location: location
   }
 }
@@ -63,7 +66,7 @@ var eventHubNamespaceName = eventHubs.outputs.namespaceName
 module containerApp 'modules/container-app.bicep' = {
   name: 'container-app'
   params: {
-    environmentName: environmentName
+    environmentName: normalizedEnvironmentName
     location: location
     appInsightsConnectionString: monitoring.outputs.appInsightsConnectionString
     issLocationHubName: eventHubs.outputs.issLocationHubName
