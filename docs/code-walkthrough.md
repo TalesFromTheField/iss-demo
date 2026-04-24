@@ -617,18 +617,23 @@ to match your Fabric deployment and you're off to the races! 🏎️
 
 ---
 
-## 🔌 Fabric CLI Script (`scripts/deploy-fabric.sh`)
+## 🔌 Fabric CLI Scripts (`scripts/deploy-fabric.sh`, `scripts/deploy-fabric.ps1`)
 
 > 📁 [`scripts/deploy-fabric.sh`](../scripts/deploy-fabric.sh)
+> 📁 [`scripts/deploy-fabric.ps1`](../scripts/deploy-fabric.ps1)
 
-This Bash script automates the creation of Fabric resources using the
-**Fabric CLI** (`fab`). It's your one-command setup for the Fabric side of
-things! 🪄
+These automation scripts create Fabric resources using the **Fabric CLI** (`fab`).
+Use the Bash script in POSIX shells or the PowerShell script for native Windows
+execution.
 
 ### Usage
 
 ```bash
 ./scripts/deploy-fabric.sh --workspace-id <YOUR_WORKSPACE_GUID>
+```
+
+```powershell
+.\scripts\deploy-fabric.ps1 -WorkspaceId <YOUR_WORKSPACE_GUID>
 ```
 
 ### What It Automates ✅

@@ -63,7 +63,7 @@ Expected results:
 
 Follow the [Fabric Setup Guide](./fabric-setup.md) to:
 
-1. Create an Eventhouse and KQL Database, or run `scripts/deploy-fabric.sh`
+1. Create an Eventhouse and KQL Database, or run `scripts/deploy-fabric.sh` / `scripts/deploy-fabric.ps1`
 2. Create two EventStreams:
    - `iss-location` Event Hub to `ISS_Loc`
    - `astronauts` Event Hub to `Astronauts`

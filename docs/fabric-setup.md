@@ -9,22 +9,50 @@
 - Event Hub namespace FQDN (e.g., `evhns-iss-dev.servicebus.windows.net`)
 - Fabric CLI installed (optional — for automated resource creation)
 
+### Windows requirement for Fabric CLI
+
+If you install `fabric-cli` on Windows, install **Build Tools for Visual Studio 2022**
+with the following components before running `pip install ms-fabric-cli`:
+
+- MSVC v143 - VS 2022 C++ x64/x86 build tools (Latest)
+- Windows 10 SDK (10.0.19041+) or Windows 11 SDK
+- C++ CMake tools for Windows
+
+After installing these components, open **x64 Native Tools Command Prompt for VS 2022**
+and run `pip install ms-fabric-cli` from that prompt.
+
 ## 🚀 Option A: Automated Setup (Fabric CLI)
 
-The fastest way! Run the deployment script:
+The fastest way! Run one of the deployment scripts:
 
 ```bash
 # Install Fabric CLI if you haven't
-pip install fabric-cli
+pip install ms-fabric-cli
+
+# Authenticate (the CLI must provide auth/api commands)
+fab auth login
+
+# Deploy Fabric resources from Bash
+./scripts/deploy-fabric.sh --workspace-id <YOUR_WORKSPACE_ID>
+```
+
+```powershell
+# Install Fabric CLI if you haven't
+pip install ms-fabric-cli
 
 # Authenticate
 fab auth login
 
-# Deploy Fabric resources
-./scripts/deploy-fabric.sh --workspace-id <YOUR_WORKSPACE_ID>
+# Deploy Fabric resources from PowerShell
+.\scripts\deploy-fabric.ps1 -WorkspaceId <YOUR_WORKSPACE_ID>
 ```
 
 This creates the Eventhouse, KQL Database, and EventStreams automatically. You'll still need to complete the manual wiring steps in Section 3 below.
+
+If your install gives you `fabric-cli` instead of `fab`, you likely installed the wrong
+package (`fabric-cli` from PyPI, which is unrelated). Install `ms-fabric-cli` instead.
+If `fab --help` does not show `auth` and `api` commands, the script path will not work.
+Use Option B (manual portal setup) in that case.
 
 ## 🖱️ Option B: Manual Setup (Fabric Portal)
 

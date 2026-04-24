@@ -90,6 +90,11 @@ Ready to deploy? Here's how to get rolling:
 2. **🧵 Set Up Microsoft Fabric** — Follow the [Fabric Setup Guide](docs/fabric-setup.md) to configure EventStreams, KQL Database, and Power BI.
 3. **🎉 Watch the ISS fly!** — Open your Power BI dashboard and see the station orbit in real-time.
 
+> Windows note for `fabric-cli`: install **Build Tools for Visual Studio 2022** with
+> **MSVC v143 - VS 2022 C++ x64/x86 build tools**, **Windows 10/11 SDK**, and
+> **C++ CMake tools for Windows**. Then run `pip install ms-fabric-cli` from the
+> **x64 Native Tools Command Prompt for VS 2022**.
+
 ---
 
 ## 🔧 What's Automated vs Manual
@@ -164,7 +169,8 @@ iss-demo/
 │   └── parameters/
 │       └── dev.bicepparam     #   Dev environment parameters
 ├── 📂 scripts/                # Automation scripts
-│   └── deploy-fabric.sh       #   Fabric CLI resource provisioning
+│   ├── deploy-fabric.sh       #   Fabric CLI resource provisioning (Bash)
+│   └── deploy-fabric.ps1      #   Fabric CLI resource provisioning (PowerShell)
 ├── 📂 kql/                    # Kusto queries
 │   └── ISS.kql                #   Ad-hoc ISS data analysis
 ├── 📂 PBI/                    # Power BI

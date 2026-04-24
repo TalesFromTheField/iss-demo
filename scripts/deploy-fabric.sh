@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ===========================================================================
-# Deploy Fabric resources for ISS Demo using the Fabric CLI (fab).
+# Deploy Fabric resources for ISS Demo using the Microsoft Fabric CLI (fab).
 #
 # Automates creation of Eventhouse, KQL Database, and EventStreams.
 # The EventStream-to-KQL DB data connection (last-mile wiring) must be
@@ -10,7 +10,7 @@
 #     ./scripts/deploy-fabric.sh --workspace-id <WORKSPACE_ID>
 #
 # Prerequisites:
-#     - Fabric CLI installed: pip install fabric-cli
+#     - Fabric CLI installed: pip install ms-fabric-cli
 #     - Authenticated: fab auth login
 #     - Fabric workspace with capacity assigned
 #
@@ -24,20 +24,20 @@
 #     1. Open each EventStream in the Fabric portal
 #     2. Add Azure Event Hub source (iss-location / astronauts hub)
 #     3. Add KQL Database destination pointing to iss-demo-kqldb
-#     4. Map iss-location stream → ISS_Loc table
-#     5. Map astronauts stream → Astronauts table
+#     4. Map iss-location stream -> ISS_Loc table
+#     5. Map astronauts stream -> Astronauts table
 # ===========================================================================
 
 set -euo pipefail
 
-# ── Defaults ────────────────────────────────────────────────────────────────
+# -- Defaults ---------------------------------------------------------------
 
 EVENTHOUSE_NAME="iss-demo-eventhouse"
 KQLDB_NAME="iss-demo-kqldb"
 WORKSPACE_ID=""
 VERBOSE=""
 
-# ── Colors ──────────────────────────────────────────────────────────────────
+# -- Colors -----------------------------------------------------------------
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -45,7 +45,7 @@ YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
-# ── Helpers ─────────────────────────────────────────────────────────────────
+# -- Helpers ----------------------------------------------------------------
 
 info()  { echo -e "${CYAN}[INFO]${NC}  $*"; }
 ok()    { echo -e "${GREEN}[OK]${NC}    $*"; }
@@ -69,22 +69,19 @@ EOF
     exit 0
 }
 
-# Extract JSON field value — lightweight, no jq dependency required if fab
-# outputs plain text. Falls back to python if available.
+# Extract JSON field value (uses Python when available, grep fallback otherwise).
 json_field() {
     local json="$1" field="$2"
-    # Try python first (most reliable)
-    if command -v python3 &>/dev/null; then
+    if command -v python3 >/dev/null 2>&1; then
         echo "$json" | python3 -c "import sys,json; print(json.load(sys.stdin).get('$field',''))"
-    elif command -v python &>/dev/null; then
+    elif command -v python >/dev/null 2>&1; then
         echo "$json" | python -c "import sys,json; print(json.load(sys.stdin).get('$field',''))"
     else
-        # Crude grep fallback
         echo "$json" | grep -oP "\"$field\"\s*:\s*\"?\K[^\",}]+"
     fi
 }
 
-# ── Parse arguments ─────────────────────────────────────────────────────────
+# -- Parse arguments --------------------------------------------------------
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -103,36 +100,44 @@ if [[ -z "$WORKSPACE_ID" ]]; then
     usage
 fi
 
-# ── Preflight checks ───────────────────────────────────────────────────────
+# -- Preflight checks -------------------------------------------------------
 
 info "Checking prerequisites..."
 
-if ! command -v fab &>/dev/null; then
+if ! command -v fab >/dev/null 2>&1; then
     err "Fabric CLI ('fab') not found."
-    err "Install it with: pip install fabric-cli"
+    err "Install Microsoft Fabric CLI with: pip install ms-fabric-cli"
+    err "If you installed 'fabric-cli', uninstall it and install 'ms-fabric-cli'."
     err "Then authenticate: fab auth login"
     exit 1
 fi
+
 ok "Fabric CLI found: $(fab --version 2>/dev/null || echo 'unknown version')"
 
-# Verify authentication
-if ! fab auth status $VERBOSE &>/dev/null; then
+if ! fab --help 2>&1 | grep -q "auth" || ! fab --help 2>&1 | grep -q "api"; then
+    err "Detected a 'fab' executable that does not expose required 'auth'/'api' commands."
+    err "Install the Microsoft Fabric CLI package: pip install ms-fabric-cli"
+    err "Use manual setup in docs/fabric-setup.md if this environment cannot run fab."
+    exit 1
+fi
+
+if ! fab auth status $VERBOSE >/dev/null 2>&1; then
     err "Not authenticated with Fabric CLI."
     err "Run: fab auth login"
     exit 1
 fi
-ok "Fabric CLI authenticated"
 
+ok "Fabric CLI authenticated"
 info "Workspace ID: $WORKSPACE_ID"
 echo ""
 
-# ── Create Eventhouse ───────────────────────────────────────────────────────
+# -- Create Eventhouse ------------------------------------------------------
 
 info "Creating Eventhouse '$EVENTHOUSE_NAME'..."
 
 EVENTHOUSE_RESPONSE=$(fab api -X POST \
     "workspaces/$WORKSPACE_ID/eventhouses" \
-    -i "{\"displayName\": \"$EVENTHOUSE_NAME\", \"description\": \"Eventhouse for ISS Demo — hosts the KQL database for real-time ISS tracking.\"}" \
+    -i "{\"displayName\": \"$EVENTHOUSE_NAME\", \"description\": \"Eventhouse for ISS Demo - hosts the KQL database for real-time ISS tracking.\"}" \
     $VERBOSE 2>&1) || {
     err "Failed to create Eventhouse."
     err "$EVENTHOUSE_RESPONSE"
@@ -146,16 +151,17 @@ if [[ -z "$EVENTHOUSE_ID" ]]; then
     err "$EVENTHOUSE_RESPONSE"
     exit 1
 fi
+
 ok "Eventhouse created: $EVENTHOUSE_ID"
 
-# ── Create KQL Database ────────────────────────────────────────────────────
+# -- Create KQL Database ----------------------------------------------------
 
 info "Creating KQL Database '$KQLDB_NAME'..."
 
 KQLDB_PAYLOAD=$(cat <<JSON
 {
     "displayName": "$KQLDB_NAME",
-    "description": "KQL Database for ISS Demo — stores ISS_Loc and Astronauts tables ingested via EventStreams.",
+    "description": "KQL Database for ISS Demo - stores ISS_Loc and Astronauts tables ingested via EventStreams.",
     "creationPayload": {
         "databaseType": "ReadWrite",
         "parentEventhouseItemId": "$EVENTHOUSE_ID"
@@ -180,9 +186,10 @@ if [[ -z "$KQLDB_ID" ]]; then
     err "$KQLDB_RESPONSE"
     exit 1
 fi
+
 ok "KQL Database created: $KQLDB_ID"
 
-# ── Create EventStreams ─────────────────────────────────────────────────────
+# -- Create EventStreams ----------------------------------------------------
 
 declare -A EVENTSTREAM_IDS
 
@@ -191,7 +198,7 @@ for ES_NAME in "iss-location-eventstream" "astronauts-eventstream"; do
 
     ES_RESPONSE=$(fab api -X POST \
         "workspaces/$WORKSPACE_ID/eventstreams" \
-        -i "{\"displayName\": \"$ES_NAME\", \"description\": \"EventStream for ISS Demo — $ES_NAME.\"}" \
+        -i "{\"displayName\": \"$ES_NAME\", \"description\": \"EventStream for ISS Demo - $ES_NAME.\"}" \
         $VERBOSE 2>&1) || {
         err "Failed to create EventStream '$ES_NAME'."
         err "$ES_RESPONSE"
@@ -210,36 +217,36 @@ for ES_NAME in "iss-location-eventstream" "astronauts-eventstream"; do
     ok "EventStream created: $ES_ID ($ES_NAME)"
 done
 
-# ── Summary ─────────────────────────────────────────────────────────────────
+# -- Summary ----------------------------------------------------------------
 
 echo ""
 echo "======================================================================"
-echo "  🛰️  ISS DEMO — FABRIC RESOURCE DEPLOYMENT SUMMARY"
+echo "  ISS DEMO - FABRIC RESOURCE DEPLOYMENT SUMMARY"
 echo "======================================================================"
 echo ""
 echo "  Workspace ID:  $WORKSPACE_ID"
 echo ""
-echo "  ✅ Created resources:"
+echo "  Created resources:"
 echo "     Eventhouse      : $EVENTHOUSE_ID  ($EVENTHOUSE_NAME)"
 echo "     KQL Database    : $KQLDB_ID  ($KQLDB_NAME)"
 for ES_NAME in "${!EVENTSTREAM_IDS[@]}"; do
     echo "     EventStream     : ${EVENTSTREAM_IDS[$ES_NAME]}  ($ES_NAME)"
 done
 echo ""
-echo "  ⚠️  MANUAL STEPS REQUIRED:"
-echo "  ──────────────────────────────────────────────────────"
+echo "  MANUAL STEPS REQUIRED:"
+echo "  ------------------------------------------------------"
 echo "  The EventStream-to-KQL DB data connection cannot be"
 echo "  fully automated via API. Complete these steps in the"
 echo "  Fabric portal (https://app.fabric.microsoft.com):"
 echo ""
 echo "  1. Open 'iss-location-eventstream'"
-echo "     a. Add source → Azure Event Hub → iss-location hub"
-echo "     b. Add destination → KQL Database → $KQLDB_NAME"
+echo "     a. Add source -> Azure Event Hub -> iss-location hub"
+echo "     b. Add destination -> KQL Database -> $KQLDB_NAME"
 echo "     c. Map to table: ISS_Loc"
 echo ""
 echo "  2. Open 'astronauts-eventstream'"
-echo "     a. Add source → Azure Event Hub → astronauts hub"
-echo "     b. Add destination → KQL Database → $KQLDB_NAME"
+echo "     a. Add source -> Azure Event Hub -> astronauts hub"
+echo "     b. Add destination -> KQL Database -> $KQLDB_NAME"
 echo "     c. Map to table: Astronauts"
 echo ""
 echo "  3. Verify data is flowing:"
@@ -251,4 +258,4 @@ echo "  For detailed instructions, see: docs/fabric-setup.md"
 echo "======================================================================"
 echo ""
 
-info "🎉 Deployment complete! See manual steps above."
+info "Deployment complete. See manual steps above."
