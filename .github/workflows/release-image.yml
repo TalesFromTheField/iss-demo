@@ -80,6 +80,22 @@ jobs:
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.created=${{ github.event.release.created_at }}
 
+      - name: Ensure GHCR package visibility is public
+        if: ${{ secrets.GHCR_VISIBILITY_TOKEN != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GHCR_VISIBILITY_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+          PACKAGE_NAME: ${{ github.event.repository.name }}
+        run: |
+          PACKAGE_LOWER=$(echo "$PACKAGE_NAME" | tr '[:upper:]' '[:lower:]')
+
+          if gh api -X PATCH "/orgs/$OWNER/packages/container/$PACKAGE_LOWER/visibility" -f visibility=public >/dev/null 2>&1; then
+            echo "Package visibility set to public (org package): $OWNER/$PACKAGE_LOWER"
+          else
+            gh api -X PATCH "/user/packages/container/$PACKAGE_LOWER/visibility" -f visibility=public >/dev/null
+            echo "Package visibility set to public (user package): $OWNER/$PACKAGE_LOWER"
+          fi
+
       - name: Output image URI
         id: image
         run: |
