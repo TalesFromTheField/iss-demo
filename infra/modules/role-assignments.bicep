@@ -1,32 +1,25 @@
 // ---------------------------------------------------------------------------
 // Module: RBAC role assignments for ISS Demo
-// Grants the Container App managed identity roles for:
-//   - Azure Event Hubs Data Sender (Event Hubs namespace)
-//   - AcrPull (Container Registry)
+// Grants the Function App's managed identity the Azure Event Hubs Data Sender
+// role scoped to the Event Hubs namespace (least-privilege).
 // ---------------------------------------------------------------------------
 
 // ── Parameters ──────────────────────────────────────────────────────────────
 
-@description('The principal ID of the Container App system-assigned Managed Identity.')
+@description('The principal ID of the Function App system-assigned Managed Identity.')
 param principalId string
 
-@description('Full resource ID of the Event Hubs namespace (used for scoping, kept for backward compatibility).')
+@description('Full resource ID of the Event Hubs namespace (used for scoping).')
 #disable-next-line no-unused-params
 param eventHubNamespaceResourceId string
 
 @description('Name of the existing Event Hubs namespace.')
 param eventHubNamespaceName string
 
-@description('Full resource ID of the Azure Container Registry (optional).')
-param acrResourceId string = ''
-
 // ── Variables ───────────────────────────────────────────────────────────────
 
 @description('Built-in role definition ID for Azure Event Hubs Data Sender.')
 var eventHubsDataSenderRoleId = '2b629674-e913-4c01-ae53-ef4638d8f975'
-
-@description('Built-in role definition ID for AcrPull.')
-var acrPullRoleId = '7f951dda-4ed3-4680-a7ca-6e2d8e0a6666'
 
 // ── Existing Resource Reference ─────────────────────────────────────────────
 
@@ -35,15 +28,10 @@ resource eventHubNamespace 'Microsoft.EventHub/namespaces@2024-01-01' existing =
   name: eventHubNamespaceName
 }
 
-@description('Reference to the existing Container Registry for scoping the AcrPull role assignment.')
-resource containerRegistry 'Microsoft.ContainerRegistry/registries@2023-07-01' existing = if (!empty(acrResourceId)) {
-  name: last(split(acrResourceId, '/'))
-}
+// ── Role Assignment ─────────────────────────────────────────────────────────
 
-// ── Role Assignments ────────────────────────────────────────────────────────
-
-@description('Assigns the Azure Event Hubs Data Sender role to the Container App managed identity, scoped to the Event Hubs namespace.')
-resource ehRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+@description('Assigns the Azure Event Hubs Data Sender role to the Function App managed identity, scoped to the Event Hubs namespace.')
+resource roleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   name: guid(eventHubNamespace.id, principalId, eventHubsDataSenderRoleId)
   scope: eventHubNamespace
   properties: {
@@ -53,21 +41,7 @@ resource ehRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' =
   }
 }
 
-@description('Assigns the AcrPull role to the Container App managed identity, scoped to the Container Registry.')
-resource acrRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(acrResourceId)) {
-  name: guid(acrResourceId, principalId, acrPullRoleId)
-  scope: containerRegistry
-  properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', acrPullRoleId)
-    principalId: principalId
-    principalType: 'ServicePrincipal'
-  }
-}
-
 // ── Outputs ─────────────────────────────────────────────────────────────────
 
-@description('The resource ID of the Event Hubs role assignment.')
-output ehRoleAssignmentId string = ehRoleAssignment.id
-
-@description('The resource ID of the ACR pull role assignment (if ACR provided).')
-output acrRoleAssignmentId string = !empty(acrResourceId) ? acrRoleAssignment.id : ''
+@description('The resource ID of the role assignment.')
+output roleAssignmentId string = roleAssignment.id
