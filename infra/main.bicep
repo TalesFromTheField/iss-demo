@@ -13,8 +13,8 @@ param environmentName string
 @description('Azure region for all resources.')
 param location string = resourceGroup().location
 
-@description('Container image URI. Defaults to the public GHCR image published from repository releases.')
-param containerImageUri string = 'ghcr.io/talesfromthefield/iss-demo:latest'
+@description('Container image URI override. Defaults to the latest published GHCR image when empty.')
+param containerImageUri string = ''
 
 @description('Event Hubs connection string (for container app environment).')
 @secure()
@@ -52,7 +52,7 @@ module containerRegistry 'modules/container-registry.bicep' = {
 
 // ── Module: Container App ──────────────────────────────────────────────────
 
-// Determine effective image URI (use provided image or fall back to the public release image)
+// Determine effective image URI (use provided image or default to published GHCR image)
 var effectiveImageUri = !empty(containerImageUri) 
   ? containerImageUri 
   : 'ghcr.io/talesfromthefield/iss-demo:latest'
@@ -68,7 +68,7 @@ module eventHubsConnStr 'modules/get-eventhub-connstr.bicep' = if (empty(eventHu
 
 var effectiveEventHubConnectionString = !empty(eventHubConnectionString)
   ? eventHubConnectionString
-  : eventHubsConnStr!.outputs.connectionString
+  : eventHubsConnStr.outputs.connectionString
 
 module containerApp 'modules/container-app.bicep' = {
   name: 'container-app'
