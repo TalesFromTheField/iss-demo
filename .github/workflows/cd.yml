@@ -11,13 +11,67 @@ permissions:
 env:
   AZURE_RESOURCE_GROUP: rg-iss-demo-dev
   AZURE_LOCATION: eastus2
-  FUNCTION_APP_NAME: func-iss-dev
+  REGISTRY_NAME: acrissdev
+  IMAGE_NAME: iss-demo
+  IMAGE_TAG: latest
 
 jobs:
+  build-image:
+    name: Build & Push Container Image
+    runs-on: ubuntu-latest
+    environment: dev
+    outputs:
+      image-uri: ${{ steps.image.outputs.uri }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Get ACR credentials
+        id: acr
+        run: |
+          REGISTRY_URL=$(az acr show \
+            --name ${{ env.REGISTRY_NAME }} \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --query loginServer -o tsv 2>/dev/null || echo "")
+          echo "registry-url=${REGISTRY_URL}" >> $GITHUB_OUTPUT
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Azure Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ steps.acr.outputs.registry-url }}
+          username: ${{ secrets.AZURE_CLIENT_ID }}
+          password: ${{ secrets.AZURE_CLIENT_SECRET }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ steps.acr.outputs.registry-url }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+            ${{ steps.acr.outputs.registry-url }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+
+      - name: Output image URI
+        id: image
+        run: |
+          echo "uri=${{ steps.acr.outputs.registry-url }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}" >> $GITHUB_OUTPUT
+
   deploy-infra:
     name: Deploy Infrastructure
     runs-on: ubuntu-latest
+    needs: build-image
     environment: dev
+    outputs:
+      container-app-name: ${{ steps.deploy.outputs.containerAppName }}
     steps:
       - uses: actions/checkout@v4
 
@@ -28,45 +82,49 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Deploy Bicep
+      - name: Deploy Bicep with Container Image
+        id: deploy
         run: |
-          az deployment group create \
+          # Get ACR admin credentials
+          ACR_USERNAME=$(az acr credential show \
+            --name ${{ env.REGISTRY_NAME }} \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --query "username" -o tsv)
+          
+          ACR_PASSWORD=$(az acr credential show \
+            --name ${{ env.REGISTRY_NAME }} \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --query "passwords[0].value" -o tsv)
+          
+          # Get Event Hub connection string
+          EH_CONN=$(az eventhubs namespace authorization-rule keys list \
+            --name RootManageSharedAccessKey \
+            --namespace-name evhns-iss-dev \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --query primaryConnectionString -o tsv 2>/dev/null || echo "")
+
+          # Deploy infrastructure with container image parameters
+          DEPLOY_OUTPUT=$(az deployment group create \
             --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
             --template-file infra/main.bicep \
             --parameters infra/parameters/dev.bicepparam \
-            --name "iss-demo-$(date +%Y%m%d-%H%M%S)"
-
-  deploy-functions:
-    name: Deploy Functions
-    runs-on: ubuntu-latest
-    needs: deploy-infra
-    environment: dev
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Azure Login (OIDC)
-        uses: azure/login@v2
-        with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Deploy Function App
-        uses: Azure/functions-action@v1
-        with:
-          app-name: ${{ env.FUNCTION_APP_NAME }}
-          package: functions
-          scm-do-build-during-deployment: true
-          enable-oryx-build: true
+            --parameters \
+              containerImageUri="${{ needs.build-image.outputs.image-uri }}" \
+              acrLoginServer="$(echo ${{ needs.build-image.outputs.image-uri }} | cut -d'/' -f1)" \
+              acrAdminUsername="${ACR_USERNAME}" \
+              acrAdminPassword="${ACR_PASSWORD}" \
+              eventHubConnectionString="${EH_CONN}" \
+            --name "iss-demo-$(date +%Y%m%d-%H%M%S)" \
+            --query "properties.outputs" -o json)
+          
+          # Extract container app name from deployment outputs
+          CONTAINER_APP_NAME=$(echo "$DEPLOY_OUTPUT" | jq -r '.containerAppName.value' 2>/dev/null || echo "ca-iss-dev")
+          echo "containerAppName=${CONTAINER_APP_NAME}" >> $GITHUB_OUTPUT
 
   smoke-test:
     name: Post-Deploy Smoke Test
     runs-on: ubuntu-latest
-    needs: deploy-functions
+    needs: [build-image, deploy-infra]
     environment: dev
     steps:
       - uses: actions/checkout@v4
@@ -78,41 +136,24 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Verify Function App is healthy
+      - name: Verify Container App is healthy
         run: |
-          echo "Checking Function App status..."
-          STATUS=$(az functionapp show \
-            --name ${{ env.FUNCTION_APP_NAME }} \
+          echo "Checking Container App status..."
+          STATUS=$(az containerapp show \
+            --name ${{ needs.deploy-infra.outputs.container-app-name }} \
             --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-            --query "state" -o tsv)
-          echo "Function App state: $STATUS"
-          if [ "$STATUS" != "Running" ]; then
-            echo "::error::Function App is not running (state: $STATUS)"
+            --query "properties.provisioningState" -o tsv)
+          echo "Container App provisioning state: $STATUS"
+          if [ "$STATUS" != "Succeeded" ]; then
+            echo "::error::Container App is not healthy (state: $STATUS)"
             exit 1
           fi
-          echo "✅ Function App is running"
-
-      - name: Verify timer functions are registered
-        run: |
-          echo "Listing registered functions..."
-          FUNCTIONS=$(az functionapp function list \
-            --name ${{ env.FUNCTION_APP_NAME }} \
-            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-            --query "[].name" -o tsv)
-          echo "Registered functions: $FUNCTIONS"
-          
-          echo "$FUNCTIONS" | grep -q "get_iss_location" || \
-            { echo "::error::get_iss_location not found"; exit 1; }
-          echo "✅ get_iss_location registered"
-          
-          echo "$FUNCTIONS" | grep -q "get_astronauts" || \
-            { echo "::error::get_astronauts not found"; exit 1; }
-          echo "✅ get_astronauts registered"
+          echo "✅ Container App is provisioned and healthy"
 
       - name: Verify events reaching Event Hubs
         run: |
-          echo "Waiting 60s for events to flow..."
-          sleep 60
+          echo "Waiting 30s for container to start and begin sending events..."
+          sleep 30
           
           NAMESPACE="evhns-iss-dev"
           
@@ -126,7 +167,7 @@ jobs:
               --query "value[0].timeseries[0].data[-1].total" -o tsv 2>/dev/null || echo "0")
             echo "  Incoming messages for $HUB: $INCOMING"
             if [ "${INCOMING:-0}" = "0" ] || [ "$INCOMING" = "None" ]; then
-              echo "::warning::No incoming messages detected for $HUB (may need more time)"
+              echo "::warning::No incoming messages detected for $HUB yet (may need more time)"
             else
               echo "  ✅ Events flowing to $HUB"
             fi

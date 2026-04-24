@@ -12,18 +12,28 @@ param environmentName string
 @description('Azure region for all resources in this module.')
 param location string
 
-@description('Name of the Function App (informational; used in alert display names).')
+@description('Name of the Function App (informational; for backward compatibility).')
 param functionAppName string = ''
 
-@description('Resource ID of the Function App to scope metric alerts against. When empty, alert rules are not deployed.')
+@description('Resource ID of the Function App (for backward compatibility; used in alert display names).')
 param functionAppResourceId string = ''
+
+@description('Name of the Container App (informational; used in alert display names).')
+param containerAppName string = ''
+
+@description('Resource ID of the Container App to scope metric alerts against. When empty, alert rules are not deployed.')
+param containerAppResourceId string = ''
 
 // ── Variables ───────────────────────────────────────────────────────────────
 
 var logAnalyticsName = 'law-iss-${environmentName}'
-var appInsightsName  = 'appi-iss-${environmentName}'
+var appInsightsName = 'appi-iss-${environmentName}'
 
-var alertsEnabled = !empty(functionAppResourceId)
+// Use Container App resource ID if provided, otherwise fall back to Function App
+var effectiveAppResourceId = !empty(containerAppResourceId) ? containerAppResourceId : functionAppResourceId
+var effectiveAppName = !empty(containerAppName) ? containerAppName : functionAppName
+
+var alertsEnabled = !empty(effectiveAppResourceId)
 
 // ── Log Analytics Workspace ─────────────────────────────────────────────────
 
@@ -64,17 +74,17 @@ resource appInsights 'Microsoft.Insights/components@2020-02-02' = {
 // ── Metric Alert: Function Execution Failures ───────────────────────────────
 
 @description('Fires when Function App execution failures exceed 5 within a 5-minute window.')
-resource failureAlert 'Microsoft.Insights/metricAlerts@2018-03-01' = if (alertsEnabled) {
+resource failureAlert 'Microsoft.Insights/metricAlerts@2018-03-01' = if (alertsEnabled && !empty(functionAppResourceId)) {
   name: 'alert-func-failures-${environmentName}'
   location: 'global'
   properties: {
-    description: 'Function execution failures exceeded threshold (>5 in 5 min) for ${!empty(functionAppName) ? functionAppName : 'Function App'}.'
+    description: 'Function execution failures exceeded threshold (>5 in 5 min) for ${effectiveAppName}.'
     severity: 2
     enabled: true
     evaluationFrequency: 'PT1M'
     windowSize: 'PT5M'
     scopes: [
-      functionAppResourceId
+      effectiveAppResourceId
     ]
     criteria: {
       'odata.type': 'Microsoft.Azure.Monitor.SingleResourceMultipleMetricCriteria'
@@ -108,17 +118,17 @@ resource failureAlert 'Microsoft.Insights/metricAlerts@2018-03-01' = if (alertsE
 // ── Metric Alert: Zero Successful Executions (Function Stopped) ─────────────
 
 @description('Fires when there are zero successful Function executions over a 10-minute window, indicating the Function App may have stopped.')
-resource stoppedAlert 'Microsoft.Insights/metricAlerts@2018-03-01' = if (alertsEnabled) {
+resource stoppedAlert 'Microsoft.Insights/metricAlerts@2018-03-01' = if (alertsEnabled && !empty(functionAppResourceId)) {
   name: 'alert-func-stopped-${environmentName}'
   location: 'global'
   properties: {
-    description: 'No successful function executions detected in the last 10 minutes for ${!empty(functionAppName) ? functionAppName : 'Function App'}. The Function App may have stopped.'
+    description: 'No successful function executions detected in the last 10 minutes for ${effectiveAppName}. The Function App may have stopped.'
     severity: 1
     enabled: true
     evaluationFrequency: 'PT5M'
     windowSize: 'PT10M'
     scopes: [
-      functionAppResourceId
+      effectiveAppResourceId
     ]
     criteria: {
       'odata.type': 'Microsoft.Azure.Monitor.SingleResourceMultipleMetricCriteria'
