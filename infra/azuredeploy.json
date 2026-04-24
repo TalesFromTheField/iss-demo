@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.42.1.51946",
-      "templateHash": "2062633085668513876"
+      "templateHash": "3009807386543984899"
     }
   },
   "parameters": {
@@ -26,14 +26,14 @@
       "type": "string",
       "defaultValue": "",
       "metadata": {
-        "description": "Container image URI override. Defaults to the latest published GHCR image when empty."
+        "description": "Optional container image URI override. Leave blank to deploy ghcr.io/talesfromthefield/iss-demo:latest."
       }
     },
     "eventHubConnectionString": {
       "type": "securestring",
       "defaultValue": "",
       "metadata": {
-        "description": "Event Hubs connection string (for container app environment)."
+        "description": "Optional Event Hubs connection string override for the container app. Leave blank to use the connection string from the Event Hubs namespace deployed by this template."
       }
     }
   },
@@ -504,64 +504,6 @@
       }
     },
     {
-      "condition": "[empty(parameters('eventHubConnectionString'))]",
-      "type": "Microsoft.Resources/deployments",
-      "apiVersion": "2025-04-01",
-      "name": "get-eventhub-connstr",
-      "properties": {
-        "expressionEvaluationOptions": {
-          "scope": "inner"
-        },
-        "mode": "Incremental",
-        "parameters": {
-          "eventHubNamespaceName": {
-            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'event-hubs'), '2025-04-01').outputs.namespaceName.value]"
-          },
-          "resourceGroupName": {
-            "value": "[resourceGroup().name]"
-          }
-        },
-        "template": {
-          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
-          "contentVersion": "1.0.0.0",
-          "metadata": {
-            "_generator": {
-              "name": "bicep",
-              "version": "0.42.1.51946",
-              "templateHash": "5716762982596857331"
-            }
-          },
-          "parameters": {
-            "eventHubNamespaceName": {
-              "type": "string",
-              "metadata": {
-                "description": "Name of the Event Hubs namespace."
-              }
-            },
-            "resourceGroupName": {
-              "type": "string",
-              "metadata": {
-                "description": "Name of the resource group (for querying existing resource)."
-              }
-            }
-          },
-          "resources": [],
-          "outputs": {
-            "connectionString": {
-              "type": "string",
-              "metadata": {
-                "description": "Primary connection string for the Event Hubs namespace."
-              },
-              "value": "[listKeys(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.EventHub/namespaces/authorizationRules', parameters('eventHubNamespaceName'), 'RootManageSharedAccessKey'), '2024-01-01').primaryConnectionString]"
-            }
-          }
-        }
-      },
-      "dependsOn": [
-        "[resourceId('Microsoft.Resources/deployments', 'event-hubs')]"
-      ]
-    },
-    {
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
       "name": "container-app",
@@ -589,7 +531,7 @@
           "containerImageUri": {
             "value": "[variables('effectiveImageUri')]"
           },
-          "eventHubConnectionString": "[if(not(empty(parameters('eventHubConnectionString'))), createObject('value', parameters('eventHubConnectionString')), createObject('value', reference(resourceId('Microsoft.Resources/deployments', 'get-eventhub-connstr'), '2025-04-01').outputs.connectionString.value))]"
+          "eventHubConnectionString": "[if(not(empty(parameters('eventHubConnectionString'))), createObject('value', parameters('eventHubConnectionString')), createObject('value', listKeys(resourceId('Microsoft.EventHub/namespaces/authorizationRules', reference(resourceId('Microsoft.Resources/deployments', 'event-hubs'), '2025-04-01').outputs.namespaceName.value, 'RootManageSharedAccessKey'), '2024-01-01').primaryConnectionString))]"
         },
         "template": {
           "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
@@ -759,7 +701,6 @@
       },
       "dependsOn": [
         "[resourceId('Microsoft.Resources/deployments', 'event-hubs')]",
-        "[resourceId('Microsoft.Resources/deployments', 'get-eventhub-connstr')]",
         "[resourceId('Microsoft.Resources/deployments', 'monitoring')]"
       ]
     },

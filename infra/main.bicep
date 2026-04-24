@@ -13,10 +13,10 @@ param environmentName string
 @description('Azure region for all resources.')
 param location string = resourceGroup().location
 
-@description('Container image URI override. Defaults to the latest published GHCR image when empty.')
+@description('Optional container image URI override. Leave blank to deploy ghcr.io/talesfromthefield/iss-demo:latest.')
 param containerImageUri string = ''
 
-@description('Event Hubs connection string (for container app environment).')
+@description('Optional Event Hubs connection string override for the container app. Leave blank to use the connection string from the Event Hubs namespace deployed by this template.')
 @secure()
 param eventHubConnectionString string = ''
 
@@ -57,18 +57,18 @@ var effectiveImageUri = !empty(containerImageUri)
   ? containerImageUri 
   : 'ghcr.io/talesfromthefield/iss-demo:latest'
 
-// For Event Hub connection string, retrieve it from the Event Hubs namespace if not provided
-module eventHubsConnStr 'modules/get-eventhub-connstr.bicep' = if (empty(eventHubConnectionString)) {
-  name: 'get-eventhub-connstr'
-  params: {
-    eventHubNamespaceName: eventHubs.outputs.namespaceName
-    resourceGroupName: resourceGroup().name
-  }
+resource eventHubNamespace 'Microsoft.EventHub/namespaces@2024-01-01' existing = if (empty(eventHubConnectionString)) {
+  name: eventHubs.outputs.namespaceName
+}
+
+resource eventHubRootManageRule 'Microsoft.EventHub/namespaces/authorizationRules@2024-01-01' existing = if (empty(eventHubConnectionString)) {
+  name: 'RootManageSharedAccessKey'
+  parent: eventHubNamespace
 }
 
 var effectiveEventHubConnectionString = !empty(eventHubConnectionString)
   ? eventHubConnectionString
-  : eventHubsConnStr.outputs.connectionString
+  : eventHubRootManageRule!.listKeys().primaryConnectionString
 
 module containerApp 'modules/container-app.bicep' = {
   name: 'container-app'
