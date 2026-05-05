@@ -68,38 +68,6 @@ function Invoke-FabApi {
     return Invoke-Fab -Arguments $arguments
 }
 
-# Runs a single KQL management command against a Fabric KQL database.
-# Uses the Kusto REST management endpoint with a bearer token from az CLI.
-# Returns $true on success, $false on failure (non-throwing).
-function Invoke-KustoMgmt {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$QueryUri,
-
-        [Parameter(Mandatory = $true)]
-        [string]$Database,
-
-        [Parameter(Mandatory = $true)]
-        [string]$Token,
-
-        [Parameter(Mandatory = $true)]
-        [string]$Command
-    )
-
-    $body = (@{ csl = $Command; db = $Database } | ConvertTo-Json -Compress)
-    $headers = @{
-        Authorization  = "Bearer $Token"
-        'Content-Type' = 'application/json'
-    }
-    try {
-        $null = Invoke-RestMethod -Uri "$QueryUri/v1/rest/mgmt" -Method Post -Headers $headers -Body $body -ErrorAction Stop
-        return $true
-    } catch {
-        Write-WarnMsg "  Command failed: $($_.Exception.Message)"
-        return $false
-    }
-}
-
 function Get-FabResourceId {
     param(
         [Parameter(Mandatory = $true)]
@@ -334,63 +302,75 @@ if (-not $fabricQueryUri) {
     Write-Ok "Fabric Ingestion URI detected: $fabricQueryUri"
 }
 
-# -- Apply KQL Schema -------------------------------------------------------
+# -- Apply KQL Schema via fab import ----------------------------------------
+# fab export produces a DatabaseSchema.kql inside the item definition folder.
+# fab import re-applies that definition, running all management commands in
+# DatabaseSchema.kql against the live KQL database. No az CLI or Kusto REST
+# token needed — fab uses the same auth session as the rest of this script.
 
-if (-not $fabricQueryUri) {
-    Write-WarnMsg "Skipping automated schema setup — Query URI not available."
-    Write-WarnMsg "Run kql/schema.kql manually in the Fabric KQL Database editor."
-} elseif (-not (Get-Command az -ErrorAction SilentlyContinue)) {
-    Write-WarnMsg "Azure CLI ('az') not found — skipping automated schema setup."
-    Write-WarnMsg "Run kql/schema.kql manually in the Fabric KQL Database editor."
-} else {
-    Write-Info "Applying KQL schema (tables, mappings, streaming ingestion policy)..."
+Write-Info "Applying KQL schema via fab import..."
 
-    $kustoToken = $null
-    try {
-        $kustoToken = (az account get-access-token --resource https://kusto.windows.net --query accessToken -o tsv 2>&1).Trim()
-        if ($LASTEXITCODE -ne 0) { $kustoToken = $null }
-    } catch {
-        $kustoToken = $null
+$schemaDir = Join-Path $env:TEMP "iss-demo-kqldb.KQLDatabase"
+$platformFile = Join-Path $schemaDir ".platform"
+$propsFile    = Join-Path $schemaDir "DatabaseProperties.json"
+$schemaFile   = Join-Path $schemaDir "DatabaseSchema.kql"
+
+New-Item -ItemType Directory -Path $schemaDir -Force | Out-Null
+
+# .platform — item metadata required by fab import
+@"
+{
+    "`$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+    "metadata": {
+        "type": "KQLDatabase",
+        "displayName": "$KqlDbName"
+    },
+    "config": {
+        "version": "2.0",
+        "logicalId": "00000000-0000-0000-0000-000000000000"
     }
+}
+"@ | Set-Content -Path $platformFile -Encoding UTF8
 
-    if (-not $kustoToken) {
-        Write-WarnMsg "Could not get Kusto access token — are you logged in with 'az login'?"
-        Write-WarnMsg "Run kql/schema.kql manually in the Fabric KQL Database editor."
-    } else {
-        # JSON mapping arrays (single-quoted PS literals so double-quotes are preserved as-is)
-        $issMapping = '[{"column":"Timestamp","path":"$.Timestamp","datatype":"datetime"},{"column":"CollectedAtUtc","path":"$.CollectedAtUtc","datatype":"datetime"},{"column":"Latitude","path":"$.Latitude","datatype":"real"},{"column":"Longitude","path":"$.Longitude","datatype":"real"}]'
-        $astroMapping = '[{"column":"CollectedAtUtc","path":"$.CollectedAtUtc","datatype":"datetime"},{"column":"Number","path":"$.Number","datatype":"int"},{"column":"People","path":"$.People","datatype":"dynamic"}]'
+# DatabaseProperties.json — KQL database configuration
+(@{
+    databaseType           = 'ReadWrite'
+    parentEventhouseItemId = $eventhouseId
+    oneLakeCachingPeriod         = 'P365000D'
+    oneLakeStandardStoragePeriod = 'P365000D'
+} | ConvertTo-Json) | Set-Content -Path $propsFile -Encoding UTF8
 
-        $schemaCommands = @(
-            ".alter database ['$KqlDbName'] policy streamingingestion enable",
-            ".create-merge table ISS_Loc (Timestamp: datetime, CollectedAtUtc: datetime, Latitude: real, Longitude: real)",
-            ".create-or-alter table ISS_Loc ingestion json mapping 'ISS_Loc_JSON_Mapping' '$issMapping'",
-            ".create-merge table Astronauts (CollectedAtUtc: datetime, Number: int, People: dynamic)",
-            ".create-or-alter table Astronauts ingestion json mapping 'Astronauts_JSON_Mapping' '$astroMapping'"
-        )
+# DatabaseSchema.kql — all management commands; idempotent on re-run
+$issMapping   = '[{"column":"Timestamp","path":"$.Timestamp","datatype":"datetime"},{"column":"CollectedAtUtc","path":"$.CollectedAtUtc","datatype":"datetime"},{"column":"Latitude","path":"$.Latitude","datatype":"real"},{"column":"Longitude","path":"$.Longitude","datatype":"real"}]'
+$astroMapping = '[{"column":"CollectedAtUtc","path":"$.CollectedAtUtc","datatype":"datetime"},{"column":"Number","path":"$.Number","datatype":"int"},{"column":"People","path":"$.People","datatype":"dynamic"}]'
 
-        # Brief pause to ensure the KQL database management endpoint is fully ready
-        Start-Sleep -Seconds 5
+@"
+// KQL script
+// Auto-generated by deploy-fabric.ps1 — do not edit manually.
+// All commands are idempotent and safe to re-run.
 
-        $schemaOk = $true
-        foreach ($cmd in $schemaCommands) {
-            $label = if ($cmd.Length -gt 70) { $cmd.Substring(0, 70) + '…' } else { $cmd }
-            Write-Info "  $label"
-            $ok = Invoke-KustoMgmt -QueryUri $fabricQueryUri -Database $KqlDbName -Token $kustoToken -Command $cmd
-            if ($ok) {
-                Write-Ok "  Done"
-            } else {
-                $schemaOk = $false
-            }
-        }
+.alter database ['$KqlDbName'] policy streamingingestion enable
 
-        if ($schemaOk) {
-            Write-Ok "KQL schema applied: ISS_Loc, Astronauts tables + streaming ingestion policy"
-        } else {
-            Write-WarnMsg "Some schema commands failed — see warnings above."
-            Write-WarnMsg "Re-run this script or apply kql/schema.kql manually to finish setup."
-        }
-    }
+.create-merge table ISS_Loc (Timestamp: datetime, CollectedAtUtc: datetime, Latitude: real, Longitude: real)
+
+.create-or-alter table ISS_Loc ingestion json mapping 'ISS_Loc_JSON_Mapping' '$issMapping'
+
+.create-merge table Astronauts (CollectedAtUtc: datetime, Number: int, People: dynamic)
+
+.create-or-alter table Astronauts ingestion json mapping 'Astronauts_JSON_Mapping' '$astroMapping'
+"@ | Set-Content -Path $schemaFile -Encoding UTF8
+
+$importArgs = @('import', "$WorkspaceId/$KqlDbName.KQLDatabase", '-i', $schemaDir, '--force')
+if ($CliVerbose) { $importArgs += '--verbose' }
+
+try {
+    Invoke-Fab -Arguments $importArgs | Out-Null
+    Write-Ok "KQL schema applied: ISS_Loc, Astronauts tables + streaming ingestion policy"
+} catch {
+    Write-WarnMsg "fab import reported an issue: $($_.Exception.Message)"
+    Write-WarnMsg "Re-run this script or apply kql/schema.kql manually to finish setup."
+} finally {
+    Remove-Item -Path $schemaDir -Recurse -Force -ErrorAction SilentlyContinue
 }
 
 Write-Host ''
