@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.42.1.51946",
-      "templateHash": "17147251874133368460"
+      "templateHash": "17892752863525894775"
     }
   },
   "parameters": {
@@ -746,7 +746,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.42.1.51946",
-              "templateHash": "8547906750561210997"
+              "templateHash": "7052262467869990380"
             }
           },
           "parameters": {
@@ -839,6 +839,22 @@
               ]
             },
             {
+              "type": "Microsoft.Storage/storageAccounts",
+              "apiVersion": "2023-05-01",
+              "name": "[format('stbootstrap{0}', uniqueString(resourceGroup().id))]",
+              "location": "[parameters('location')]",
+              "sku": {
+                "name": "Standard_LRS"
+              },
+              "kind": "StorageV2",
+              "properties": {
+                "allowSharedKeyAccess": true,
+                "minimumTlsVersion": "TLS1_2",
+                "supportsHttpsTrafficOnly": true,
+                "publicNetworkAccess": "Enabled"
+              }
+            },
+            {
               "type": "Microsoft.Resources/deploymentScripts",
               "apiVersion": "2023-08-01",
               "name": "bootstrap-fabric",
@@ -855,6 +871,10 @@
                 "timeout": "PT30M",
                 "retentionInterval": "PT1H",
                 "cleanupPreference": "OnSuccess",
+                "storageAccountSettings": {
+                  "storageAccountName": "[format('stbootstrap{0}', uniqueString(resourceGroup().id))]",
+                  "storageAccountKey": "[listKeys(resourceId('Microsoft.Storage/storageAccounts', format('stbootstrap{0}', uniqueString(resourceGroup().id))), '2023-05-01').keys[0].value]"
+                },
                 "environmentVariables": [
                   {
                     "name": "FABRIC_CLIENT_ID",
@@ -897,6 +917,7 @@
               },
               "dependsOn": [
                 "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'uami-bootstrap-iss')]",
+                "[resourceId('Microsoft.Storage/storageAccounts', format('stbootstrap{0}', uniqueString(resourceGroup().id)))]",
                 "[resourceId('Microsoft.Authorization/roleAssignments', guid(resourceGroup().id, resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'uami-bootstrap-iss'), 'contributor-bootstrap'))]"
               ]
             }

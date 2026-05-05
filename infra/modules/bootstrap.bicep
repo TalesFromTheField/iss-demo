@@ -76,6 +76,24 @@ resource contributorRoleAssignment 'Microsoft.Authorization/roleAssignments@2022
   }
 }
 
+// ── Storage Account for deploymentScript ────────────────────────────────────
+// deploymentScript requires a storage account for logs and outputs.
+// We provision our own so we can explicitly allow key-based auth
+// (the platform-created one would also need it, but some policies block it).
+
+resource bootstrapStorage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
+  name: 'stbootstrap${uniqueString(resourceGroup().id)}'
+  location: location
+  sku: { name: 'Standard_LRS' }
+  kind: 'StorageV2'
+  properties: {
+    allowSharedKeyAccess: true
+    minimumTlsVersion: 'TLS1_2'
+    supportsHttpsTrafficOnly: true
+    publicNetworkAccess: 'Enabled'
+  }
+}
+
 // ── Deployment Script ───────────────────────────────────────────────────────
 
 resource bootstrapScript 'Microsoft.Resources/deploymentScripts@2023-08-01' = {
@@ -93,6 +111,10 @@ resource bootstrapScript 'Microsoft.Resources/deploymentScripts@2023-08-01' = {
     timeout: 'PT30M'
     retentionInterval: 'PT1H'
     cleanupPreference: 'OnSuccess'
+    storageAccountSettings: {
+      storageAccountName: bootstrapStorage.name
+      storageAccountKey: bootstrapStorage.listKeys().keys[0].value
+    }
     environmentVariables: [
       { name: 'FABRIC_CLIENT_ID', value: fabricClientId }
       { name: 'FABRIC_CLIENT_SECRET', secureValue: fabricClientSecret }
@@ -108,6 +130,7 @@ resource bootstrapScript 'Microsoft.Resources/deploymentScripts@2023-08-01' = {
   }
   dependsOn: [
     contributorRoleAssignment
+    bootstrapStorage
   ]
 }
 
