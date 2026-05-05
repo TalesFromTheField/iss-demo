@@ -103,6 +103,16 @@ is_conflict() {
     [[ "$code" == "409" ]]
 }
 
+# Returns true (exit 0) if the response JSON has status_code 202 (async accepted).
+is_accepted() {
+    local json="$1"
+    local code
+    code=$(echo "$json" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status_code',''))" 2>/dev/null \
+        || echo "$json" | python -c "import sys,json; print(json.load(sys.stdin).get('status_code',''))" 2>/dev/null \
+        || echo "0")
+    [[ "$code" == "202" ]]
+}
+
 # Lists items at $1 and returns the ID of the item whose displayName equals $2.
 get_existing_id() {
     local list_path="$1" display_name="$2"
@@ -123,6 +133,23 @@ items=data.get('text',data).get('value',[])
 match=[i for i in items if i.get('displayName')=='$display_name']
 print(match[0]['id'] if match else '')"
     fi
+}
+
+# Polls $1 (list path) every 5 s until displayName $2 appears, up to $3 seconds (default 120).
+wait_for_resource_id() {
+    local list_path="$1" display_name="$2" max_wait="${3:-120}" interval=5 elapsed=0
+    local id
+    while [[ $elapsed -lt $max_wait ]]; do
+        id=$(get_existing_id "$list_path" "$display_name")
+        if [[ -n "$id" ]]; then
+            echo "$id"
+            return 0
+        fi
+        info "  Waiting for '$display_name' to be ready... ($elapsed/${max_wait}s)"
+        sleep "$interval"
+        elapsed=$((elapsed + interval))
+    done
+    return 1
 }
 
 # -- Parse arguments --------------------------------------------------------
@@ -199,6 +226,14 @@ if [[ -z "$EVENTHOUSE_ID" ]]; then
             exit 1
         fi
         ok "Using existing Eventhouse: $EVENTHOUSE_ID"
+    elif is_accepted "$EVENTHOUSE_RESPONSE"; then
+        info "Eventhouse creation accepted (async) — polling until ready..."
+        EVENTHOUSE_ID=$(wait_for_resource_id "workspaces/$WORKSPACE_ID/eventhouses" "$EVENTHOUSE_NAME")
+        if [[ -z "$EVENTHOUSE_ID" ]]; then
+            err "Timed out waiting for Eventhouse '$EVENTHOUSE_NAME' to be provisioned."
+            exit 1
+        fi
+        ok "Eventhouse ready: $EVENTHOUSE_ID"
     else
         err "Could not extract Eventhouse ID from response:"
         err "$EVENTHOUSE_RESPONSE"
@@ -244,6 +279,14 @@ if [[ -z "$KQLDB_ID" ]]; then
             exit 1
         fi
         ok "Using existing KQL Database: $KQLDB_ID"
+    elif is_accepted "$KQLDB_RESPONSE"; then
+        info "KQL Database creation accepted (async) — polling until ready..."
+        KQLDB_ID=$(wait_for_resource_id "workspaces/$WORKSPACE_ID/kqlDatabases" "$KQLDB_NAME")
+        if [[ -z "$KQLDB_ID" ]]; then
+            err "Timed out waiting for KQL Database '$KQLDB_NAME' to be provisioned."
+            exit 1
+        fi
+        ok "KQL Database ready: $KQLDB_ID"
     else
         err "Could not extract KQL Database ID from response:"
         err "$KQLDB_RESPONSE"
@@ -280,6 +323,14 @@ for ES_NAME in "iss-location-eventstream" "astronauts-eventstream"; do
                 exit 1
             fi
             ok "Using existing EventStream: $ES_ID ($ES_NAME)"
+        elif is_accepted "$ES_RESPONSE"; then
+            info "EventStream creation accepted (async) — polling until ready..."
+            ES_ID=$(wait_for_resource_id "workspaces/$WORKSPACE_ID/eventstreams" "$ES_NAME")
+            if [[ -z "$ES_ID" ]]; then
+                err "Timed out waiting for EventStream '$ES_NAME' to be provisioned."
+                exit 1
+            fi
+            ok "EventStream ready: $ES_ID ($ES_NAME)"
         else
             err "Could not extract EventStream ID from response:"
             err "$ES_RESPONSE"

@@ -95,6 +95,14 @@ function Test-IsConflict {
     return $code -eq 409
 }
 
+# Returns $true if the parsed response object represents a 202 Accepted (async operation).
+function Test-IsAccepted {
+    param($Response)
+    $code = $null
+    if ($Response.PSObject.Properties.Name -contains 'status_code') { $code = [int]$Response.status_code }
+    return $code -eq 202
+}
+
 # Lists items at $ListPath and returns the ID of the one matching $DisplayName.
 function Get-ExistingFabId {
     param(
@@ -118,6 +126,27 @@ function Get-ExistingFabId {
     if (-not $items) { return $null }
     $match = $items | Where-Object { $_.displayName -eq $DisplayName } | Select-Object -First 1
     if ($match) { return [string]$match.id }
+    return $null
+}
+
+# Waits for an async-created Fabric resource to appear in the list.
+# Polls $ListPath every $IntervalSeconds until displayName match is found or $MaxWaitSeconds elapses.
+function Wait-FabResourceId {
+    param(
+        [string]$ListPath,
+        [string]$DisplayName,
+        [int]$MaxWaitSeconds = 120,
+        [int]$IntervalSeconds = 5
+    )
+
+    $elapsed = 0
+    while ($elapsed -lt $MaxWaitSeconds) {
+        $id = Get-ExistingFabId -ListPath $ListPath -DisplayName $DisplayName
+        if ($id) { return $id }
+        Write-Info "  Waiting for '$DisplayName' to be ready... ($elapsed/$MaxWaitSeconds s)"
+        Start-Sleep -Seconds $IntervalSeconds
+        $elapsed += $IntervalSeconds
+    }
     return $null
 }
 
@@ -185,6 +214,14 @@ if (-not $eventhouseId) {
             exit 1
         }
         Write-Ok "Using existing Eventhouse: $eventhouseId"
+    } elseif (Test-IsAccepted -Response $eventhouse) {
+        Write-Info "Eventhouse creation accepted (async) — polling until ready..."
+        $eventhouseId = Wait-FabResourceId -ListPath "workspaces/$WorkspaceId/eventhouses" -DisplayName $EventhouseName
+        if (-not $eventhouseId) {
+            Write-Err "Timed out waiting for Eventhouse '$EventhouseName' to be provisioned."
+            exit 1
+        }
+        Write-Ok "Eventhouse ready: $eventhouseId"
     } else {
         Write-Err 'Could not extract Eventhouse ID from response:'
         Write-Err $eventhouseResponse
@@ -225,6 +262,14 @@ if (-not $kqlDbId) {
             exit 1
         }
         Write-Ok "Using existing KQL Database: $kqlDbId"
+    } elseif (Test-IsAccepted -Response $kqlDb) {
+        Write-Info "KQL Database creation accepted (async) — polling until ready..."
+        $kqlDbId = Wait-FabResourceId -ListPath "workspaces/$WorkspaceId/kqlDatabases" -DisplayName $KqlDbName
+        if (-not $kqlDbId) {
+            Write-Err "Timed out waiting for KQL Database '$KqlDbName' to be provisioned."
+            exit 1
+        }
+        Write-Ok "KQL Database ready: $kqlDbId"
     } else {
         Write-Err 'Could not extract KQL Database ID from response:'
         Write-Err $kqlDbResponse
@@ -263,6 +308,14 @@ foreach ($eventStreamName in @('iss-location-eventstream', 'astronauts-eventstre
                 exit 1
             }
             Write-Ok "Using existing EventStream: $eventStreamId ($eventStreamName)"
+        } elseif (Test-IsAccepted -Response $eventStream) {
+            Write-Info "EventStream creation accepted (async) — polling until ready..."
+            $eventStreamId = Wait-FabResourceId -ListPath "workspaces/$WorkspaceId/eventstreams" -DisplayName $eventStreamName
+            if (-not $eventStreamId) {
+                Write-Err "Timed out waiting for EventStream '$eventStreamName' to be provisioned."
+                exit 1
+            }
+            Write-Ok "EventStream ready: $eventStreamId ($eventStreamName)"
         } else {
             Write-Err 'Could not extract EventStream ID from response:'
             Write-Err $eventStreamResponse
