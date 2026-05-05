@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.42.1.51946",
-      "templateHash": "17892752863525894775"
+      "templateHash": "14412801038583032324"
     }
   },
   "parameters": {
@@ -33,7 +33,7 @@
       "type": "string",
       "defaultValue": "",
       "metadata": {
-        "description": "Eventhouse Query URI from the Fabric portal (e.g. https://trd-xxxx.z6.kusto.data.microsoft.com). Obtained after running scripts/deploy-fabric.ps1."
+        "description": "Eventhouse Query URI from the Fabric portal (e.g. https://trd-xxxx.z6.kusto.data.microsoft.com). Leave blank when bootstrap is enabled — the bootstrap container sets this automatically."
       }
     },
     "fabricDatabaseName": {
@@ -746,14 +746,14 @@
             "_generator": {
               "name": "bicep",
               "version": "0.42.1.51946",
-              "templateHash": "7052262467869990380"
+              "templateHash": "999071259069390574"
             }
           },
           "parameters": {
             "location": {
               "type": "string",
               "metadata": {
-                "description": "Azure region for the deploymentScript and its managed identity."
+                "description": "Azure region for the bootstrap container instance and its managed identity."
               }
             },
             "containerAppName": {
@@ -811,12 +811,23 @@
               "type": "string",
               "defaultValue": "",
               "metadata": {
-                "description": "  Optional URL override for deploy-fabric.sh. Leave blank to use the script\nfrom the main branch of the TalesFromTheField/iss-demo repository.\n"
+                "description": "Optional URL override for deploy-fabric.sh. Leave blank to use the script from the main branch of the TalesFromTheField/iss-demo repository."
+              }
+            },
+            "bootstrapImageUri": {
+              "type": "string",
+              "defaultValue": "ghcr.io/talesfromthefield/iss-demo-bootstrap:latest",
+              "metadata": {
+                "description": "Bootstrap container image URI. Defaults to the latest image from GHCR."
+              }
+            },
+            "subscriptionId": {
+              "type": "string",
+              "defaultValue": "[subscription().subscriptionId]",
+              "metadata": {
+                "description": "Azure subscription ID — passed to the container so az account set works correctly."
               }
             }
-          },
-          "variables": {
-            "$fxv#0": "#!/bin/bash\n# =============================================================================\n# ISS Demo — Fabric Bootstrap Script\n#\n# Runs inside an Azure deploymentScript (managed ACI) as part of 'azd up' or\n# the Deploy to Azure flow. Performs all Fabric setup automatically:\n#\n#   1. Installs ms-fabric-cli\n#   2. Authenticates with Fabric using an app registration (service principal)\n#   3. Creates the Fabric workspace (app registration auto-becomes Admin)\n#   4. Optionally grants Admin access to ADMIN_EMAIL\n#   5. Creates Eventhouse, KQL Database, and tables (idempotent)\n#   6. Optionally deploys Power BI report from PBI/ISS.pbix\n#   7. Captures the FabricIngestionUri from the deployment output\n#   8. Updates the Container App with FabricIngestionUri so it can start\n#      streaming data to Fabric immediately\n#\n# Environment variables (injected by Bicep deploymentScript):\n#   FABRIC_CLIENT_ID        — App Registration (client) ID\n#   FABRIC_CLIENT_SECRET    — App Registration client secret (secure)\n#   FABRIC_TENANT_ID        — Azure / Entra tenant ID\n#   CONTAINER_APP_NAME      — Name of the Azure Container App to update\n#   AZURE_RESOURCE_GROUP    — Resource group containing the Container App\n#   FABRIC_WORKSPACE_NAME   — Display name for the workspace to create (default: iss-demo)\n#   ADMIN_EMAIL             — Optional: user or group email to grant Admin on the workspace\n#   DEPLOY_PBI_REPORT       — Optional: set to \"true\" to deploy PBI/ISS.pbix automatically\n#   DEPLOY_FABRIC_SCRIPT    — Optional: URL override for deploy-fabric.sh\n#\n# Output (written to $AZ_SCRIPTS_OUTPUT_PATH):\n#   { \"fabricIngestionUri\": \"https://trd-xxx.region.kusto.data.microsoft.com\",\n#     \"workspaceId\": \"<guid>\" }\n# =============================================================================\n\nset -euo pipefail\n\nRED='\\033[0;31m'; GREEN='\\033[0;32m'; YELLOW='\\033[1;33m'; CYAN='\\033[0;36m'; NC='\\033[0m'\ninfo()  { echo -e \"${CYAN}[INFO]${NC}  $*\"; }\nok()    { echo -e \"${GREEN}[OK]${NC}    $*\"; }\nwarn()  { echo -e \"${YELLOW}[WARN]${NC}  $*\"; }\nerr()   { echo -e \"${RED}[ERROR]${NC} $*\" >&2; }\n\n# -- Defaults -----------------------------------------------------------------\n\nFABRIC_WORKSPACE_NAME=\"${FABRIC_WORKSPACE_NAME:-iss-demo}\"\nDEPLOY_PBI_REPORT=\"${DEPLOY_PBI_REPORT:-false}\"\n\n# -- Validate required env vars -----------------------------------------------\n\nfor var in FABRIC_CLIENT_ID FABRIC_CLIENT_SECRET FABRIC_TENANT_ID \\\n           CONTAINER_APP_NAME AZURE_RESOURCE_GROUP ADMIN_EMAIL; do\n    if [[ -z \"${!var:-}\" ]]; then\n        err \"Missing required environment variable: $var\"\n        exit 1\n    fi\ndone\n\n# -- JSON helper (written to a temp file to avoid inline quoting issues) ------\n\ncat > /tmp/json_helper.py << 'PYEOF'\n#!/usr/bin/env python3\n\"\"\"Parse fields from fab API JSON responses. Handles the { status_code, text: {...} } envelope.\"\"\"\nimport sys, json\n\ndef main():\n    action = sys.argv[1] if len(sys.argv) > 1 else ''\n    data = json.load(sys.stdin)\n\n    if action == 'status':\n        print(data.get('status_code', ''))\n\n    elif action == 'field':\n        field = sys.argv[2]\n        inner = data.get('text', data)\n        if isinstance(inner, dict) and field in inner:\n            print(inner[field])\n        elif field in data:\n            print(data[field])\n        else:\n            print('')\n\n    elif action == 'find_by_name':\n        name = sys.argv[2]\n        inner = data.get('text', data)\n        items = inner.get('value', []) if isinstance(inner, dict) else []\n        match = [w for w in items if w.get('displayName') == name]\n        print(match[0]['id'] if match else '')\n\nif __name__ == '__main__':\n    main()\nPYEOF\n\n# Helpers that use json_helper.py to parse fab API JSON envelopes.\njson_status()    { echo \"$1\" | python3 /tmp/json_helper.py status; }\njson_field()     { echo \"$1\" | python3 /tmp/json_helper.py field \"$2\"; }\nfind_by_name()   { echo \"$1\" | python3 /tmp/json_helper.py find_by_name \"$2\"; }\n\n# URL-encode a value (keeps client secret off the process argument list).\nurl_encode() { printf '%s' \"$1\" | python3 -c \"import sys,urllib.parse; print(urllib.parse.quote(sys.stdin.read()))\"; }\n\n# -- Install ms-fabric-cli ----------------------------------------------------\n\ninfo \"Installing ms-fabric-cli...\"\npip install -q --disable-pip-version-check ms-fabric-cli\nok \"ms-fabric-cli installed: $(fab --version 2>/dev/null || echo 'unknown')\"\n\n# -- Authenticate with Fabric -------------------------------------------------\n\ninfo \"Authenticating with Fabric (app registration: $FABRIC_CLIENT_ID)...\"\nfab auth login \\\n    -u \"$FABRIC_CLIENT_ID\" \\\n    -p \"$FABRIC_CLIENT_SECRET\" \\\n    --tenant \"$FABRIC_TENANT_ID\"\nok \"Fabric authenticated\"\n\n# -- Create or reuse Fabric workspace -----------------------------------------\n\ninfo \"Creating Fabric workspace '$FABRIC_WORKSPACE_NAME'...\"\n\nWORKSPACE_RESPONSE=$(fab api -X post workspaces \\\n    -i \"{\\\"displayName\\\": \\\"$FABRIC_WORKSPACE_NAME\\\"}\" 2>&1) || true\n\nSTATUS=$(json_status \"$WORKSPACE_RESPONSE\")\nWORKSPACE_ID=\"\"\n\nif [[ \"$STATUS\" == \"201\" ]]; then\n    WORKSPACE_ID=$(json_field \"$WORKSPACE_RESPONSE\" \"id\")\n    ok \"Workspace created: $WORKSPACE_ID (app registration is auto-Admin)\"\nelif [[ \"$STATUS\" == \"409\" ]]; then\n    warn \"Workspace '$FABRIC_WORKSPACE_NAME' already exists — finding existing workspace ID...\"\n    WORKSPACE_LIST=$(fab api -X get workspaces 2>&1) || true\n    WORKSPACE_ID=$(find_by_name \"$WORKSPACE_LIST\" \"$FABRIC_WORKSPACE_NAME\")\n    if [[ -z \"$WORKSPACE_ID\" ]]; then\n        err \"Workspace '$FABRIC_WORKSPACE_NAME' exists but the app registration cannot access it.\"\n        err \"Grant the app registration (client ID: $FABRIC_CLIENT_ID) Admin or Member access\"\n        err \"in the Fabric portal, then re-run the bootstrap.\"\n        exit 1\n    fi\n    ok \"Using existing workspace: $WORKSPACE_ID\"\nelse\n    err \"Failed to create workspace '$FABRIC_WORKSPACE_NAME' (status: $STATUS):\"\n    err \"$WORKSPACE_RESPONSE\"\n    exit 1\nfi\n\n# -- Grant Admin access to ADMIN_EMAIL ----------------------------------------\n\ninfo \"Granting Admin access to '$ADMIN_EMAIL'...\"\nADMIN_OBJECT_ID=\"\"\n\n    # Try az CLI user lookup (UAMI has Directory.Read if granted via Bicep)\n    ADMIN_OBJECT_ID=$(az ad user show --id \"$ADMIN_EMAIL\" --query id -o tsv 2>/dev/null || echo \"\")\n\n    # Try az CLI group lookup (handles group emails / display names)\n    if [[ -z \"$ADMIN_OBJECT_ID\" ]]; then\n        ADMIN_OBJECT_ID=$(az ad group show --group \"$ADMIN_EMAIL\" --query id -o tsv 2>/dev/null || echo \"\")\n    fi\n\n    # Fallback: Microsoft Graph API with SP credentials (needs User.Read.All or Directory.Read.All)\n    if [[ -z \"$ADMIN_OBJECT_ID\" ]]; then\n        info \"  az lookup failed — trying Microsoft Graph API with SP credentials...\"\n        ENCODED_SECRET=$(url_encode \"$FABRIC_CLIENT_SECRET\")\n        GRAPH_TOKEN=$(curl -s -X POST \\\n            \"https://login.microsoftonline.com/$FABRIC_TENANT_ID/oauth2/v2.0/token\" \\\n            -H \"Content-Type: application/x-www-form-urlencoded\" \\\n            -d \"grant_type=client_credentials&client_id=$FABRIC_CLIENT_ID&client_secret=${ENCODED_SECRET}&scope=https://graph.microsoft.com/.default\" \\\n            | python3 -c \"import sys,json; print(json.load(sys.stdin).get('access_token',''))\" 2>/dev/null || echo \"\")\n\n        if [[ -n \"$GRAPH_TOKEN\" ]]; then\n            ADMIN_OBJECT_ID=$(curl -s \\\n                \"https://graph.microsoft.com/v1.0/users/$ADMIN_EMAIL\" \\\n                -H \"Authorization: Bearer $GRAPH_TOKEN\" \\\n                | python3 -c \"import sys,json; print(json.load(sys.stdin).get('id',''))\" 2>/dev/null || echo \"\")\n        fi\n    fi\n\n    if [[ -n \"$ADMIN_OBJECT_ID\" ]]; then\n        if fab acl set \"${FABRIC_WORKSPACE_NAME}.Workspace\" -I \"$ADMIN_OBJECT_ID\" -R Admin --force 2>&1; then\n            ok \"Admin access granted to $ADMIN_EMAIL (object ID: $ADMIN_OBJECT_ID)\"\n        else\n            warn \"fab acl set failed — add '$ADMIN_EMAIL' as Admin manually in the Fabric portal.\"\n        fi\n    else\n        warn \"Could not resolve Entra object ID for '$ADMIN_EMAIL'.\"\n        warn \"Add Admin access manually in the Fabric portal: https://app.fabric.microsoft.com\"\n        warn \"  Workspace: $FABRIC_WORKSPACE_NAME\"\nfi\n\n# -- Download and run deploy-fabric.sh ----------------------------------------\n\nSCRIPT_URL=\"${DEPLOY_FABRIC_SCRIPT:-https://raw.githubusercontent.com/TalesFromTheField/iss-demo/main/scripts/deploy-fabric.sh}\"\ninfo \"Downloading deploy-fabric.sh from: $SCRIPT_URL\"\ncurl -fsSL \"$SCRIPT_URL\" -o /tmp/deploy-fabric.sh\nchmod +x /tmp/deploy-fabric.sh\nok \"Script downloaded\"\n\ninfo \"Running Fabric deployment for workspace: $WORKSPACE_ID\"\nDEPLOY_OUTPUT=$(/tmp/deploy-fabric.sh --workspace-id \"$WORKSPACE_ID\" 2>&1) || {\n    err \"deploy-fabric.sh failed. Output:\"\n    echo \"$DEPLOY_OUTPUT\"\n    exit 1\n}\n\necho \"$DEPLOY_OUTPUT\"\n\n# -- Extract FabricIngestionUri -----------------------------------------------\n\nFABRIC_URI=$(echo \"$DEPLOY_OUTPUT\" | grep \"FabricIngestionUri = \" | awk '{print $NF}' | tail -1)\n\nif [[ -z \"$FABRIC_URI\" ]]; then\n    warn \"Could not extract FabricIngestionUri from deployment output.\"\n    warn \"Set it manually after deployment:\"\n    warn \"  az containerapp update --name $CONTAINER_APP_NAME --resource-group $AZURE_RESOURCE_GROUP \\\\\"\n    warn \"    --set-env-vars FabricIngestionUri=<uri>\"\n    echo \"{\\\"fabricIngestionUri\\\":\\\"\\\",\\\"workspaceId\\\":\\\"$WORKSPACE_ID\\\"}\" > \"${AZ_SCRIPTS_OUTPUT_PATH:-/dev/null}\"\n    exit 0\nfi\n\nok \"FabricIngestionUri: $FABRIC_URI\"\n\n# -- Deploy Power BI report (optional) ----------------------------------------\n\nif [[ \"${DEPLOY_PBI_REPORT}\" == \"true\" ]]; then\n    info \"Deploying Power BI report (PBI/ISS.pbix) via Power BI REST API...\"\n\n    PBIX_URL=\"https://github.com/TalesFromTheField/iss-demo/raw/main/PBI/ISS.pbix\"\n    if curl -fL \"$PBIX_URL\" -o /tmp/ISS.pbix 2>/dev/null; then\n        # Get Power BI API bearer token using SP client credentials flow\n        ENCODED_SECRET=$(url_encode \"$FABRIC_CLIENT_SECRET\")\n        PBI_TOKEN=$(curl -s -X POST \\\n            \"https://login.microsoftonline.com/$FABRIC_TENANT_ID/oauth2/v2.0/token\" \\\n            -H \"Content-Type: application/x-www-form-urlencoded\" \\\n            -d \"grant_type=client_credentials&client_id=$FABRIC_CLIENT_ID&client_secret=${ENCODED_SECRET}&scope=https://analysis.windows.net/powerbi/api/.default\" \\\n            | python3 -c \"import sys,json; print(json.load(sys.stdin).get('access_token',''))\" 2>/dev/null || echo \"\")\n\n        if [[ -n \"$PBI_TOKEN\" ]]; then\n            HTTP_CODE=$(curl -s -o /tmp/pbi-import.json -w \"%{http_code}\" \\\n                -X POST \\\n                \"https://api.powerbi.com/v1.0/myorg/groups/$WORKSPACE_ID/imports?datasetDisplayName=ISS&nameConflict=CreateOrOverwrite\" \\\n                -H \"Authorization: Bearer $PBI_TOKEN\" \\\n                -F \"file=@/tmp/ISS.pbix\") || true\n\n            if [[ \"$HTTP_CODE\" == \"200\" || \"$HTTP_CODE\" == \"202\" ]]; then\n                ok \"Power BI report imported successfully (HTTP $HTTP_CODE)\"\n            else\n                warn \"Power BI import returned HTTP $HTTP_CODE. Check /tmp/pbi-import.json for details.\"\n                warn \"Import manually: open the Fabric workspace and upload PBI/ISS.pbix\"\n            fi\n        else\n            warn \"Could not obtain Power BI API token — skipping report import.\"\n            warn \"Import manually: open the Fabric workspace and upload PBI/ISS.pbix\"\n        fi\n    else\n        warn \"Could not download ISS.pbix from GitHub — skipping report import.\"\n    fi\nfi\n\n# -- Update Container App env var ---------------------------------------------\n\ninfo \"Updating Container App '$CONTAINER_APP_NAME' with FabricIngestionUri...\"\naz containerapp update \\\n    --name \"$CONTAINER_APP_NAME\" \\\n    --resource-group \"$AZURE_RESOURCE_GROUP\" \\\n    --set-env-vars \"FabricIngestionUri=$FABRIC_URI\" \\\n    --output none\nok \"Container App updated — ISS Demo is now streaming to Fabric\"\n\n# -- Write outputs ------------------------------------------------------------\n\necho \"{\\\"fabricIngestionUri\\\": \\\"$FABRIC_URI\\\", \\\"workspaceId\\\": \\\"$WORKSPACE_ID\\\"}\" > \"${AZ_SCRIPTS_OUTPUT_PATH:-/dev/null}\"\ninfo \"Bootstrap complete.\"\n"
           },
           "resources": [
             {
@@ -839,27 +850,10 @@
               ]
             },
             {
-              "type": "Microsoft.Storage/storageAccounts",
+              "type": "Microsoft.ContainerInstance/containerGroups",
               "apiVersion": "2023-05-01",
-              "name": "[format('stbootstrap{0}', uniqueString(resourceGroup().id))]",
+              "name": "aci-bootstrap-iss",
               "location": "[parameters('location')]",
-              "sku": {
-                "name": "Standard_LRS"
-              },
-              "kind": "StorageV2",
-              "properties": {
-                "allowSharedKeyAccess": true,
-                "minimumTlsVersion": "TLS1_2",
-                "supportsHttpsTrafficOnly": true,
-                "publicNetworkAccess": "Enabled"
-              }
-            },
-            {
-              "type": "Microsoft.Resources/deploymentScripts",
-              "apiVersion": "2023-08-01",
-              "name": "bootstrap-fabric",
-              "location": "[parameters('location')]",
-              "kind": "AzureCLI",
               "identity": {
                 "type": "UserAssigned",
                 "userAssignedIdentities": {
@@ -867,77 +861,75 @@
                 }
               },
               "properties": {
-                "azCliVersion": "2.59.0",
-                "timeout": "PT30M",
-                "retentionInterval": "PT1H",
-                "cleanupPreference": "OnSuccess",
-                "storageAccountSettings": {
-                  "storageAccountName": "[format('stbootstrap{0}', uniqueString(resourceGroup().id))]",
-                  "storageAccountKey": "[listKeys(resourceId('Microsoft.Storage/storageAccounts', format('stbootstrap{0}', uniqueString(resourceGroup().id))), '2023-05-01').keys[0].value]"
-                },
-                "environmentVariables": [
+                "restartPolicy": "Never",
+                "osType": "Linux",
+                "containers": [
                   {
-                    "name": "FABRIC_CLIENT_ID",
-                    "value": "[parameters('fabricClientId')]"
-                  },
-                  {
-                    "name": "FABRIC_CLIENT_SECRET",
-                    "secureValue": "[parameters('fabricClientSecret')]"
-                  },
-                  {
-                    "name": "FABRIC_TENANT_ID",
-                    "value": "[parameters('fabricTenantId')]"
-                  },
-                  {
-                    "name": "FABRIC_WORKSPACE_NAME",
-                    "value": "[parameters('fabricWorkspaceName')]"
-                  },
-                  {
-                    "name": "CONTAINER_APP_NAME",
-                    "value": "[parameters('containerAppName')]"
-                  },
-                  {
-                    "name": "AZURE_RESOURCE_GROUP",
-                    "value": "[parameters('resourceGroupName')]"
-                  },
-                  {
-                    "name": "ADMIN_EMAIL",
-                    "value": "[parameters('adminEmail')]"
-                  },
-                  {
-                    "name": "DEPLOY_PBI_REPORT",
-                    "value": "[if(parameters('deployPbiReport'), 'true', 'false')]"
-                  },
-                  {
-                    "name": "DEPLOY_FABRIC_SCRIPT",
-                    "value": "[parameters('deployFabricScriptUrl')]"
+                    "name": "bootstrap",
+                    "properties": {
+                      "image": "[parameters('bootstrapImageUri')]",
+                      "environmentVariables": [
+                        {
+                          "name": "FABRIC_CLIENT_ID",
+                          "value": "[parameters('fabricClientId')]"
+                        },
+                        {
+                          "name": "FABRIC_CLIENT_SECRET",
+                          "secureValue": "[parameters('fabricClientSecret')]"
+                        },
+                        {
+                          "name": "FABRIC_TENANT_ID",
+                          "value": "[parameters('fabricTenantId')]"
+                        },
+                        {
+                          "name": "FABRIC_WORKSPACE_NAME",
+                          "value": "[parameters('fabricWorkspaceName')]"
+                        },
+                        {
+                          "name": "CONTAINER_APP_NAME",
+                          "value": "[parameters('containerAppName')]"
+                        },
+                        {
+                          "name": "AZURE_RESOURCE_GROUP",
+                          "value": "[parameters('resourceGroupName')]"
+                        },
+                        {
+                          "name": "AZURE_SUBSCRIPTION_ID",
+                          "value": "[parameters('subscriptionId')]"
+                        },
+                        {
+                          "name": "UAMI_CLIENT_ID",
+                          "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'uami-bootstrap-iss'), '2023-01-31').clientId]"
+                        },
+                        {
+                          "name": "ADMIN_EMAIL",
+                          "value": "[parameters('adminEmail')]"
+                        },
+                        {
+                          "name": "DEPLOY_PBI_REPORT",
+                          "value": "[if(parameters('deployPbiReport'), 'true', 'false')]"
+                        },
+                        {
+                          "name": "DEPLOY_FABRIC_SCRIPT",
+                          "value": "[parameters('deployFabricScriptUrl')]"
+                        }
+                      ],
+                      "resources": {
+                        "requests": {
+                          "cpu": 1,
+                          "memoryInGB": "[json('1.5')]"
+                        }
+                      }
+                    }
                   }
-                ],
-                "scriptContent": "[variables('$fxv#0')]"
+                ]
               },
               "dependsOn": [
                 "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'uami-bootstrap-iss')]",
-                "[resourceId('Microsoft.Storage/storageAccounts', format('stbootstrap{0}', uniqueString(resourceGroup().id)))]",
                 "[resourceId('Microsoft.Authorization/roleAssignments', guid(resourceGroup().id, resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'uami-bootstrap-iss'), 'contributor-bootstrap'))]"
               ]
             }
-          ],
-          "outputs": {
-            "fabricIngestionUri": {
-              "type": "string",
-              "metadata": {
-                "description": "Fabric Ingestion URI detected and applied to the Container App by the bootstrap script."
-              },
-              "value": "[coalesce(reference(resourceId('Microsoft.Resources/deploymentScripts', 'bootstrap-fabric'), '2023-08-01').outputs.fabricIngestionUri, '')]"
-            },
-            "workspaceId": {
-              "type": "string",
-              "metadata": {
-                "description": "Fabric workspace GUID created (or reused) by the bootstrap script."
-              },
-              "value": "[coalesce(reference(resourceId('Microsoft.Resources/deploymentScripts', 'bootstrap-fabric'), '2023-08-01').outputs.workspaceId, '')]"
-            }
-          }
+          ]
         }
       },
       "dependsOn": [
@@ -971,16 +963,16 @@
     "fabricIngestionUri": {
       "type": "string",
       "metadata": {
-        "description": "Fabric Ingestion URI applied to the Container App (only set when bootstrap ran)."
+        "description": "Fabric Ingestion URI — set directly by the bootstrap container via az containerapp update."
       },
-      "value": "[if(variables('bootstrapEnabled'), reference(resourceId('Microsoft.Resources/deployments', 'bootstrap'), '2025-04-01').outputs.fabricIngestionUri.value, parameters('fabricIngestionUri'))]"
+      "value": "[parameters('fabricIngestionUri')]"
     },
     "fabricWorkspaceId": {
       "type": "string",
       "metadata": {
-        "description": "Fabric workspace GUID created by the bootstrap (only set when bootstrap ran)."
+        "description": "Fabric workspace GUID — resolved asynchronously by the bootstrap container after it runs."
       },
-      "value": "[if(variables('bootstrapEnabled'), reference(resourceId('Microsoft.Resources/deployments', 'bootstrap'), '2025-04-01').outputs.workspaceId.value, '')]"
+      "value": ""
     }
   }
 }

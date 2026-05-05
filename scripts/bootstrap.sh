@@ -2,33 +2,29 @@
 # =============================================================================
 # ISS Demo — Fabric Bootstrap Script
 #
-# Runs inside an Azure deploymentScript (managed ACI) as part of 'azd up' or
-# the Deploy to Azure flow. Performs all Fabric setup automatically:
+# Runs as an Azure Container Instance deployed by Bicep. Performs all Fabric
+# setup automatically:
 #
-#   1. Installs ms-fabric-cli
-#   2. Authenticates with Fabric using an app registration (service principal)
-#   3. Creates the Fabric workspace (app registration auto-becomes Admin)
-#   4. Optionally grants Admin access to ADMIN_EMAIL
-#   5. Creates Eventhouse, KQL Database, and tables (idempotent)
-#   6. Optionally deploys Power BI report from PBI/ISS.pbix
-#   7. Captures the FabricIngestionUri from the deployment output
-#   8. Updates the Container App with FabricIngestionUri so it can start
-#      streaming data to Fabric immediately
+#   1. Authenticates with Fabric using an app registration (service principal)
+#   2. Creates the Fabric workspace (app registration auto-becomes Admin)
+#   3. Grants Admin access to ADMIN_EMAIL
+#   4. Creates Eventhouse, KQL Database, and tables (idempotent)
+#   5. Optionally deploys Power BI report from PBI/ISS.pbix
+#   6. Captures FabricIngestionUri and updates the Container App directly
 #
-# Environment variables (injected by Bicep deploymentScript):
+# Environment variables (injected by Bicep containerGroups resource):
 #   FABRIC_CLIENT_ID        — App Registration (client) ID
 #   FABRIC_CLIENT_SECRET    — App Registration client secret (secure)
 #   FABRIC_TENANT_ID        — Azure / Entra tenant ID
 #   CONTAINER_APP_NAME      — Name of the Azure Container App to update
 #   AZURE_RESOURCE_GROUP    — Resource group containing the Container App
-#   FABRIC_WORKSPACE_NAME   — Display name for the workspace to create (default: iss-demo)
-#   ADMIN_EMAIL             — Optional: user or group email to grant Admin on the workspace
-#   DEPLOY_PBI_REPORT       — Optional: set to "true" to deploy PBI/ISS.pbix automatically
+#   AZURE_SUBSCRIPTION_ID   — Azure subscription ID (for az account set)
+#   UAMI_CLIENT_ID          — Client ID of the user-assigned managed identity
+#                             (used for az login --identity in ACI)
+#   ADMIN_EMAIL             — User or group email to grant Admin on the workspace
+#   FABRIC_WORKSPACE_NAME   — Display name for the workspace (default: iss-demo)
+#   DEPLOY_PBI_REPORT       — Set to "true" to deploy PBI/ISS.pbix automatically
 #   DEPLOY_FABRIC_SCRIPT    — Optional: URL override for deploy-fabric.sh
-#
-# Output (written to $AZ_SCRIPTS_OUTPUT_PATH):
-#   { "fabricIngestionUri": "https://trd-xxx.region.kusto.data.microsoft.com",
-#     "workspaceId": "<guid>" }
 # =============================================================================
 
 set -euo pipefail
@@ -47,7 +43,8 @@ DEPLOY_PBI_REPORT="${DEPLOY_PBI_REPORT:-false}"
 # -- Validate required env vars -----------------------------------------------
 
 for var in FABRIC_CLIENT_ID FABRIC_CLIENT_SECRET FABRIC_TENANT_ID \
-           CONTAINER_APP_NAME AZURE_RESOURCE_GROUP ADMIN_EMAIL; do
+           CONTAINER_APP_NAME AZURE_RESOURCE_GROUP AZURE_SUBSCRIPTION_ID \
+           UAMI_CLIENT_ID ADMIN_EMAIL; do
     if [[ -z "${!var:-}" ]]; then
         err "Missing required environment variable: $var"
         exit 1
@@ -97,11 +94,13 @@ find_by_name()   { echo "$1" | python3 /tmp/json_helper.py find_by_name "$2"; }
 # URL-encode a value (keeps client secret off the process argument list).
 url_encode() { printf '%s' "$1" | python3 -c "import sys,urllib.parse; print(urllib.parse.quote(sys.stdin.read()))"; }
 
-# -- Install ms-fabric-cli ----------------------------------------------------
+# -- Authenticate Azure CLI with managed identity --------------------------------
+# In ACI the UAMI is available via IMDS; we must call az login explicitly.
 
-info "Installing ms-fabric-cli..."
-pip install -q --disable-pip-version-check ms-fabric-cli
-ok "ms-fabric-cli installed: $(fab --version 2>/dev/null || echo 'unknown')"
+info "Authenticating Azure CLI with managed identity ($UAMI_CLIENT_ID)..."
+az login --identity --username "$UAMI_CLIENT_ID" --output none
+az account set --subscription "$AZURE_SUBSCRIPTION_ID" --output none
+ok "Azure CLI authenticated"
 
 # -- Authenticate with Fabric -------------------------------------------------
 
@@ -211,7 +210,6 @@ if [[ -z "$FABRIC_URI" ]]; then
     warn "Set it manually after deployment:"
     warn "  az containerapp update --name $CONTAINER_APP_NAME --resource-group $AZURE_RESOURCE_GROUP \\"
     warn "    --set-env-vars FabricIngestionUri=<uri>"
-    echo "{\"fabricIngestionUri\":\"\",\"workspaceId\":\"$WORKSPACE_ID\"}" > "${AZ_SCRIPTS_OUTPUT_PATH:-/dev/null}"
     exit 0
 fi
 
@@ -263,8 +261,4 @@ az containerapp update \
     --set-env-vars "FabricIngestionUri=$FABRIC_URI" \
     --output none
 ok "Container App updated — ISS Demo is now streaming to Fabric"
-
-# -- Write outputs ------------------------------------------------------------
-
-echo "{\"fabricIngestionUri\": \"$FABRIC_URI\", \"workspaceId\": \"$WORKSPACE_ID\"}" > "${AZ_SCRIPTS_OUTPUT_PATH:-/dev/null}"
 info "Bootstrap complete."

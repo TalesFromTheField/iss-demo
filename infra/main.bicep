@@ -16,7 +16,7 @@ param location string = resourceGroup().location
 @description('Optional container image URI override. Leave blank to deploy ghcr.io/talesfromthefield/iss-demo:latest.')
 param containerImageUri string = ''
 
-@description('Eventhouse Query URI from the Fabric portal (e.g. https://trd-xxxx.z6.kusto.data.microsoft.com). Obtained after running scripts/deploy-fabric.ps1.')
+@description('Eventhouse Query URI from the Fabric portal (e.g. https://trd-xxxx.z6.kusto.data.microsoft.com). Leave blank when bootstrap is enabled — the bootstrap container sets this automatically.')
 param fabricIngestionUri string = ''
 
 @description('Fabric KQL Database name to ingest data into.')
@@ -134,9 +134,9 @@ output containerImageUri string = effectiveImageUri
 @description('Container Registry login server.')
 output acrLoginServer string = containerRegistry.outputs.loginServer
 
-@description('Fabric Ingestion URI applied to the Container App (only set when bootstrap ran).')
-output fabricIngestionUri string = bootstrapEnabled ? bootstrap!.outputs.fabricIngestionUri : fabricIngestionUri
+@description('Fabric Ingestion URI — set directly by the bootstrap container via az containerapp update.')
+output fabricIngestionUri string = fabricIngestionUri
 
-@description('Fabric workspace GUID created by the bootstrap (only set when bootstrap ran).')
-output fabricWorkspaceId string = bootstrapEnabled ? bootstrap!.outputs.workspaceId : ''
+@description('Fabric workspace GUID — resolved asynchronously by the bootstrap container after it runs.')
+output fabricWorkspaceId string = ''
 

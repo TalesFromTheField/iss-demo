@@ -1,12 +1,15 @@
 // ---------------------------------------------------------------------------
-// Module: Bootstrap — one-shot Fabric setup via Azure deploymentScript
+// Module: Bootstrap — one-shot Fabric setup via Azure Container Instance
 //
-// Runs automatically during deployment. Installs ms-fabric-cli, authenticates
+// Runs automatically during deployment. The bootstrap container authenticates
 // with the provided app registration, creates the Fabric workspace (the app
 // registration automatically becomes Admin), creates all Fabric resources
-// (Eventhouse, KQL Database, tables), optionally grants a user/group Admin
-// access, optionally deploys the Power BI report, captures FabricIngestionUri,
-// and updates the Container App so it can start streaming data to Fabric.
+// (Eventhouse, KQL Database, tables), grants a user/group Admin access,
+// optionally deploys the Power BI report, and updates the Container App
+// with FabricIngestionUri so it can start streaming data to Fabric.
+//
+// Uses a plain ACI container group (not deploymentScript) to avoid the
+// key-based storage auth requirement imposed by deploymentScript.
 //
 // Prerequisites (one-time, done before deployment):
 //   1. Create an Azure App Registration (= service principal) in Entra ID
@@ -17,7 +20,7 @@
 
 // ── Parameters ──────────────────────────────────────────────────────────────
 
-@description('Azure region for the deploymentScript and its managed identity.')
+@description('Azure region for the bootstrap container instance and its managed identity.')
 param location string
 
 @description('Name of the Container App to update with FabricIngestionUri after setup.')
@@ -45,14 +48,17 @@ param adminEmail string
 @description('Set to true to automatically deploy the Power BI report from PBI/ISS.pbix.')
 param deployPbiReport bool = false
 
-@description('''
-  Optional URL override for deploy-fabric.sh. Leave blank to use the script
-  from the main branch of the TalesFromTheField/iss-demo repository.
-''')
+@description('Optional URL override for deploy-fabric.sh. Leave blank to use the script from the main branch of the TalesFromTheField/iss-demo repository.')
 param deployFabricScriptUrl string = ''
 
+@description('Bootstrap container image URI. Defaults to the latest image from GHCR.')
+param bootstrapImageUri string = 'ghcr.io/talesfromthefield/iss-demo-bootstrap:latest'
+
+@description('Azure subscription ID — passed to the container so az account set works correctly.')
+param subscriptionId string = subscription().subscriptionId
+
 // ── User-assigned Managed Identity ─────────────────────────────────────────
-// The deploymentScript needs a managed identity so it can call
+// The ACI uses this identity to call 'az login --identity' and then
 // 'az containerapp update' to write FabricIngestionUri back to the Container App.
 
 resource bootstrapIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
@@ -66,40 +72,22 @@ resource contributorRoleAssignment 'Microsoft.Authorization/roleAssignments@2022
   name: guid(resourceGroup().id, bootstrapIdentity.id, 'contributor-bootstrap')
   scope: resourceGroup()
   properties: {
-    // Contributor
     roleDefinitionId: subscriptionResourceId(
       'Microsoft.Authorization/roleDefinitions',
-      'b24988ac-6180-42a0-ab88-20f7382dd24c'
+      'b24988ac-6180-42a0-ab88-20f7382dd24c' // Contributor
     )
     principalId: bootstrapIdentity.properties.principalId
     principalType: 'ServicePrincipal'
   }
 }
 
-// ── Storage Account for deploymentScript ────────────────────────────────────
-// deploymentScript requires a storage account for logs and outputs.
-// We provision our own so we can explicitly allow key-based auth
-// (the platform-created one would also need it, but some policies block it).
+// ── Bootstrap Container Instance ───────────────────────────────────────────
+// Runs bootstrap.sh once (restartPolicy: Never). No storage account needed —
+// the script updates the Container App directly via az CLI + managed identity.
 
-resource bootstrapStorage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
-  name: 'stbootstrap${uniqueString(resourceGroup().id)}'
+resource bootstrapContainer 'Microsoft.ContainerInstance/containerGroups@2023-05-01' = {
+  name: 'aci-bootstrap-iss'
   location: location
-  sku: { name: 'Standard_LRS' }
-  kind: 'StorageV2'
-  properties: {
-    allowSharedKeyAccess: true
-    minimumTlsVersion: 'TLS1_2'
-    supportsHttpsTrafficOnly: true
-    publicNetworkAccess: 'Enabled'
-  }
-}
-
-// ── Deployment Script ───────────────────────────────────────────────────────
-
-resource bootstrapScript 'Microsoft.Resources/deploymentScripts@2023-08-01' = {
-  name: 'bootstrap-fabric'
-  location: location
-  kind: 'AzureCLI'
   identity: {
     type: 'UserAssigned'
     userAssignedIdentities: {
@@ -107,37 +95,41 @@ resource bootstrapScript 'Microsoft.Resources/deploymentScripts@2023-08-01' = {
     }
   }
   properties: {
-    azCliVersion: '2.59.0'
-    timeout: 'PT30M'
-    retentionInterval: 'PT1H'
-    cleanupPreference: 'OnSuccess'
-    storageAccountSettings: {
-      storageAccountName: bootstrapStorage.name
-      storageAccountKey: bootstrapStorage.listKeys().keys[0].value
-    }
-    environmentVariables: [
-      { name: 'FABRIC_CLIENT_ID', value: fabricClientId }
-      { name: 'FABRIC_CLIENT_SECRET', secureValue: fabricClientSecret }
-      { name: 'FABRIC_TENANT_ID', value: fabricTenantId }
-      { name: 'FABRIC_WORKSPACE_NAME', value: fabricWorkspaceName }
-      { name: 'CONTAINER_APP_NAME', value: containerAppName }
-      { name: 'AZURE_RESOURCE_GROUP', value: resourceGroupName }
-      { name: 'ADMIN_EMAIL', value: adminEmail }
-      { name: 'DEPLOY_PBI_REPORT', value: deployPbiReport ? 'true' : 'false' }
-      { name: 'DEPLOY_FABRIC_SCRIPT', value: deployFabricScriptUrl }
+    restartPolicy: 'Never'
+    osType: 'Linux'
+    containers: [
+      {
+        name: 'bootstrap'
+        properties: {
+          image: bootstrapImageUri
+          environmentVariables: [
+            { name: 'FABRIC_CLIENT_ID',       value: fabricClientId }
+            { name: 'FABRIC_CLIENT_SECRET',   secureValue: fabricClientSecret }
+            { name: 'FABRIC_TENANT_ID',       value: fabricTenantId }
+            { name: 'FABRIC_WORKSPACE_NAME',  value: fabricWorkspaceName }
+            { name: 'CONTAINER_APP_NAME',     value: containerAppName }
+            { name: 'AZURE_RESOURCE_GROUP',   value: resourceGroupName }
+            { name: 'AZURE_SUBSCRIPTION_ID',  value: subscriptionId }
+            { name: 'UAMI_CLIENT_ID',         value: bootstrapIdentity.properties.clientId }
+            { name: 'ADMIN_EMAIL',            value: adminEmail }
+            { name: 'DEPLOY_PBI_REPORT',      value: deployPbiReport ? 'true' : 'false' }
+            { name: 'DEPLOY_FABRIC_SCRIPT',   value: deployFabricScriptUrl }
+          ]
+          resources: {
+            requests: {
+              cpu: 1
+              memoryInGB: json('1.5')
+            }
+          }
+        }
+      }
     ]
-    scriptContent: loadTextContent('../../scripts/bootstrap.sh')
   }
   dependsOn: [
     contributorRoleAssignment
-    bootstrapStorage
   ]
 }
 
 // ── Outputs ─────────────────────────────────────────────────────────────────
-
-@description('Fabric Ingestion URI detected and applied to the Container App by the bootstrap script.')
-output fabricIngestionUri string = bootstrapScript.properties.outputs.fabricIngestionUri ?? ''
-
-@description('Fabric workspace GUID created (or reused) by the bootstrap script.')
-output workspaceId string = bootstrapScript.properties.outputs.workspaceId ?? ''
+// The ACI updates the Container App env var directly — no ARM outputs needed.
+// main.bicep should not depend on fabricIngestionUri from this module.
