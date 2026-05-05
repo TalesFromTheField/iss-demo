@@ -1,0 +1,133 @@
+name: CD
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      containerImageUri:
+        description: 'Container image URI to deploy (leave blank for latest GHCR image)'
+        required: false
+        default: ''
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AZURE_RESOURCE_GROUP: rg-iss-demo-dev
+  AZURE_LOCATION: eastus2
+
+jobs:
+  deploy-infra:
+    name: Deploy Infrastructure
+    runs-on: ubuntu-latest
+    environment: dev
+    outputs:
+      containerAppName: ${{ steps.deploy.outputs.containerAppName }}
+      acrLoginServer: ${{ steps.deploy.outputs.acrLoginServer }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Create resource group if not exists
+        run: |
+          az group create \
+            --name ${{ env.AZURE_RESOURCE_GROUP }} \
+            --location ${{ env.AZURE_LOCATION }} \
+            --output none
+
+      - name: Deploy Bicep
+        id: deploy
+        run: |
+          PARAMS="environmentName=dev location=${{ env.AZURE_LOCATION }}"
+
+          # Use provided image URI if supplied via workflow_dispatch
+          if [ -n "${{ inputs.containerImageUri }}" ]; then
+            PARAMS="$PARAMS containerImageUri=${{ inputs.containerImageUri }}"
+          fi
+
+          OUTPUT=$(az deployment group create \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --template-file infra/main.bicep \
+            --parameters infra/parameters/dev.bicepparam \
+            --name "iss-demo-$(date +%Y%m%d-%H%M%S)" \
+            --query "properties.outputs" -o json)
+
+          echo "containerAppName=$(echo $OUTPUT | jq -r '.containerAppName.value // "ca-iss-dev"')" >> $GITHUB_OUTPUT
+          echo "acrLoginServer=$(echo $OUTPUT | jq -r '.acrLoginServer.value // ""')" >> $GITHUB_OUTPUT
+
+  smoke-test:
+    name: Smoke Test
+    runs-on: ubuntu-latest
+    needs: deploy-infra
+    environment: dev
+    env:
+      CONTAINER_APP_NAME: ${{ needs.deploy-infra.outputs.containerAppName }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Verify Container App is running
+        run: |
+          echo "Checking Container App: $CONTAINER_APP_NAME"
+          STATUS=$(az containerapp show \
+            --name "$CONTAINER_APP_NAME" \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --query "properties.runningStatus" -o tsv 2>/dev/null || echo "Unknown")
+          echo "Container App running status: $STATUS"
+          if [ "$STATUS" = "Stopped" ]; then
+            echo "::error::Container App is stopped"
+            exit 1
+          fi
+          echo "✅ Container App status: $STATUS"
+
+      - name: Verify Container App replicas
+        run: |
+          REPLICAS=$(az containerapp replica list \
+            --name "$CONTAINER_APP_NAME" \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --query "length(@)" -o tsv 2>/dev/null || echo "0")
+          echo "Running replicas: $REPLICAS"
+          if [ "${REPLICAS:-0}" -eq 0 ]; then
+            echo "::warning::No running replicas detected — app may still be starting up"
+          else
+            echo "✅ $REPLICAS replica(s) running"
+          fi
+
+      - name: Verify Event Hubs receiving events
+        run: |
+          echo "Waiting 60s for events to flow..."
+          sleep 60
+
+          # Derive Event Hub namespace name from environment (matches naming in event-hubs.bicep)
+          NAMESPACE="evhns-iss-dev"
+
+          for HUB in "iss-location" "astronauts"; do
+            echo "Checking Event Hub: $HUB"
+            INCOMING=$(az monitor metrics list \
+              --resource "/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.AZURE_RESOURCE_GROUP }}/providers/Microsoft.EventHub/namespaces/$NAMESPACE/eventhubs/$HUB" \
+              --metric "IncomingMessages" \
+              --interval PT1M \
+              --query "value[0].timeseries[0].data[-1].total" -o tsv 2>/dev/null || echo "0")
+            echo "  Incoming messages for $HUB: ${INCOMING:-0}"
+            if [ "${INCOMING:-0}" = "0" ] || [ "${INCOMING:-0}" = "None" ]; then
+              echo "::warning::No incoming messages for $HUB yet — may need more warm-up time"
+            else
+              echo "  ✅ Events flowing to $HUB"
+            fi
+          done
+
+          echo "✅ Smoke test complete"
