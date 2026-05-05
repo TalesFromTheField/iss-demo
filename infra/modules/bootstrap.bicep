@@ -2,14 +2,17 @@
 // Module: Bootstrap — one-shot Fabric setup via Azure deploymentScript
 //
 // Runs automatically during deployment. Installs ms-fabric-cli, authenticates
-// with the provided service principal, creates all Fabric resources (Eventhouse,
-// KQL Database, tables), captures FabricIngestionUri, and updates the Container
-// App so it can start streaming data to Fabric immediately.
+// with the provided app registration, creates the Fabric workspace (the app
+// registration automatically becomes Admin), creates all Fabric resources
+// (Eventhouse, KQL Database, tables), optionally grants a user/group Admin
+// access, optionally deploys the Power BI report, captures FabricIngestionUri,
+// and updates the Container App so it can start streaming data to Fabric.
 //
 // Prerequisites (one-time, done before deployment):
-//   1. Create an Azure App Registration (service principal)
-//   2. Grant it "Member" or higher on the target Fabric workspace
+//   1. Create an Azure App Registration (= service principal) in Entra ID
+//   2. Enable "Service principals can use Fabric APIs" in the Fabric Admin portal
 //   3. Pass client ID, secret, and tenant ID as deployment parameters
+//   No pre-existing workspace is required — bootstrap creates it.
 // ---------------------------------------------------------------------------
 
 // ── Parameters ──────────────────────────────────────────────────────────────
@@ -23,18 +26,24 @@ param containerAppName string
 @description('Name of the Container App resource group.')
 param resourceGroupName string = resourceGroup().name
 
-@description('Fabric workspace GUID (from the Fabric portal URL).')
-param fabricWorkspaceId string
+@description('Display name for the Fabric workspace to create (e.g., "iss-demo").')
+param fabricWorkspaceName string = 'iss-demo'
 
-@description('Entra tenant ID for Fabric service principal authentication.')
+@description('Entra tenant ID for Fabric app registration authentication.')
 param fabricTenantId string
 
-@description('Application (client) ID of the service principal granted access to the Fabric workspace.')
+@description('Application (client) ID of the app registration used for Fabric access.')
 param fabricClientId string
 
-@description('Client secret of the service principal. Store this value in a Key Vault in production.')
+@description('Client secret of the app registration. Store this value in a Key Vault in production.')
 @secure()
 param fabricClientSecret string
+
+@description('Optional email of a user or group to grant Admin access to the created Fabric workspace.')
+param adminEmail string = ''
+
+@description('Set to true to automatically deploy the Power BI report from PBI/ISS.pbix.')
+param deployPbiReport bool = false
 
 @description('''
   Optional URL override for deploy-fabric.sh. Leave blank to use the script
@@ -88,9 +97,11 @@ resource bootstrapScript 'Microsoft.Resources/deploymentScripts@2023-08-01' = {
       { name: 'FABRIC_CLIENT_ID', value: fabricClientId }
       { name: 'FABRIC_CLIENT_SECRET', secureValue: fabricClientSecret }
       { name: 'FABRIC_TENANT_ID', value: fabricTenantId }
-      { name: 'FABRIC_WORKSPACE_ID', value: fabricWorkspaceId }
+      { name: 'FABRIC_WORKSPACE_NAME', value: fabricWorkspaceName }
       { name: 'CONTAINER_APP_NAME', value: containerAppName }
       { name: 'AZURE_RESOURCE_GROUP', value: resourceGroupName }
+      { name: 'ADMIN_EMAIL', value: adminEmail }
+      { name: 'DEPLOY_PBI_REPORT', value: deployPbiReport ? 'true' : 'false' }
       { name: 'DEPLOY_FABRIC_SCRIPT', value: deployFabricScriptUrl }
     ]
     scriptContent: loadTextContent('../../scripts/bootstrap.sh')
@@ -104,3 +115,6 @@ resource bootstrapScript 'Microsoft.Resources/deploymentScripts@2023-08-01' = {
 
 @description('Fabric Ingestion URI detected and applied to the Container App by the bootstrap script.')
 output fabricIngestionUri string = bootstrapScript.properties.outputs.fabricIngestionUri ?? ''
+
+@description('Fabric workspace GUID created (or reused) by the bootstrap script.')
+output workspaceId string = bootstrapScript.properties.outputs.workspaceId ?? ''

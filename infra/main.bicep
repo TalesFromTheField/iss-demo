@@ -25,29 +25,36 @@ param fabricDatabaseName string = 'iss-demo-kqldb'
 // ── Fabric Bootstrap parameters (optional — skip to configure Fabric manually) ──
 
 @description('''
-  Entra tenant ID for Fabric service principal authentication.
-  When provided together with fabricClientId, fabricClientSecret, and
-  fabricWorkspaceId, the deployment automatically provisions all Fabric
-  resources and configures the Container App — no manual steps required.
+  Entra tenant ID for Fabric app registration authentication.
+  When provided together with fabricClientId and fabricClientSecret, the
+  deployment automatically provisions all Fabric resources and configures the
+  Container App — no manual steps required.
   Leave blank to configure Fabric manually after deployment.
 ''')
 param fabricTenantId string = ''
 
-@description('Application (client) ID of the service principal granted Member access to the Fabric workspace.')
+@description('Application (client) ID of the app registration used for Fabric access.')
 param fabricClientId string = ''
 
-@description('Client secret of the service principal. This value is never logged or stored in plain text.')
+@description('Client secret of the app registration. This value is never logged or stored in plain text.')
 @secure()
 param fabricClientSecret string = ''
 
-@description('Fabric workspace GUID (visible in the Fabric portal URL: app.fabric.microsoft.com/groups/<workspace-id>).')
-param fabricWorkspaceId string = ''
+@description('Display name for the Fabric workspace to create (e.g., "iss-demo"). The bootstrap will create it.')
+param fabricWorkspaceName string = 'iss-demo'
+
+@description('Optional email of a user or group to grant Admin access to the Fabric workspace.')
+param adminEmail string = ''
+
+@description('Set to true to automatically deploy the Power BI report from PBI/ISS.pbix during bootstrap.')
+param deployPbiReport bool = false
 
 // Normalize user-provided environment names for resource naming safety.
 var normalizedEnvironmentName = toLower(replace(replace(replace(environmentName, ' ', '-'), '_', '-'), '.', '-'))
 
-// Bootstrap is enabled when all four Fabric SP parameters are provided.
-var bootstrapEnabled = !empty(fabricTenantId) && !empty(fabricClientId) && !empty(fabricClientSecret) && !empty(fabricWorkspaceId)
+// Bootstrap is enabled when the three Fabric SP credentials are provided.
+// The workspace is created automatically — no workspace ID needed.
+var bootstrapEnabled = !empty(fabricTenantId) && !empty(fabricClientId) && !empty(fabricClientSecret)
 
 // ── Module: Monitoring (base — Log Analytics + App Insights) ────────────────
 
@@ -104,10 +111,12 @@ module bootstrap 'modules/bootstrap.bicep' = if (bootstrapEnabled) {
   params: {
     location: location
     containerAppName: containerApp.outputs.containerAppName
-    fabricWorkspaceId: fabricWorkspaceId
+    fabricWorkspaceName: fabricWorkspaceName
     fabricTenantId: fabricTenantId
     fabricClientId: fabricClientId
     fabricClientSecret: fabricClientSecret
+    adminEmail: adminEmail
+    deployPbiReport: deployPbiReport
   }
   dependsOn: [
     roleAssignments
@@ -127,4 +136,7 @@ output acrLoginServer string = containerRegistry.outputs.loginServer
 
 @description('Fabric Ingestion URI applied to the Container App (only set when bootstrap ran).')
 output fabricIngestionUri string = bootstrapEnabled ? bootstrap!.outputs.fabricIngestionUri : fabricIngestionUri
+
+@description('Fabric workspace GUID created by the bootstrap (only set when bootstrap ran).')
+output fabricWorkspaceId string = bootstrapEnabled ? bootstrap!.outputs.workspaceId : ''
 
