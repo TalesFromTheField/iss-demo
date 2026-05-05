@@ -1,0 +1,91 @@
+// =============================================================================
+// ISS Demo — KQL Database Schema Setup
+//
+// Run these commands once in the Fabric KQL Database editor after running
+// scripts/deploy-fabric.ps1 (or deploy-fabric.sh) to provision the Eventhouse
+// and KQL Database.
+//
+// How to run:
+//   1. Open the Fabric portal: https://app.fabric.microsoft.com
+//   2. Navigate to your KQL Database (iss-demo-kqldb)
+//   3. Click "Explore your data" or open a new query tab
+//   4. Paste and run each section below in order
+// =============================================================================
+
+
+// -----------------------------------------------------------------------------
+// 1. Enable streaming ingestion on the database
+//    Required for low-latency real-time data from the Container App.
+// -----------------------------------------------------------------------------
+
+.alter database ['iss-demo-kqldb'] policy streamingingestion enable
+
+
+// -----------------------------------------------------------------------------
+// 2. Create the ISS_Loc table
+//    Receives one record every ~5 seconds from the Container App.
+//
+//    Columns:
+//      Timestamp      — UTC time reported by the ISS API (from UNIX epoch)
+//      CollectedAtUtc — UTC time the Container App fetched the record
+//      Latitude       — ISS latitude in decimal degrees (-90 to 90)
+//      Longitude      — ISS longitude in decimal degrees (-180 to 180)
+// -----------------------------------------------------------------------------
+
+.create-merge table ISS_Loc (
+    Timestamp:      datetime,
+    CollectedAtUtc: datetime,
+    Latitude:       real,
+    Longitude:      real
+)
+
+// JSON ingestion mapping for ISS_Loc
+.create-or-alter table ISS_Loc ingestion json mapping 'ISS_Loc_JSON_Mapping'
+```
+[
+    { "column": "Timestamp",      "path": "$.Timestamp",      "datatype": "datetime" },
+    { "column": "CollectedAtUtc", "path": "$.CollectedAtUtc", "datatype": "datetime" },
+    { "column": "Latitude",       "path": "$.Latitude",       "datatype": "real"     },
+    { "column": "Longitude",      "path": "$.Longitude",      "datatype": "real"     }
+]
+```
+
+
+// -----------------------------------------------------------------------------
+// 3. Create the Astronauts table
+//    Receives one record every ~60 seconds from the Container App.
+//
+//    Columns:
+//      CollectedAtUtc — UTC time the Container App fetched the record
+//      Number         — Total number of people currently in space
+//      People         — JSON array of { name, craft } objects
+// -----------------------------------------------------------------------------
+
+.create-merge table Astronauts (
+    CollectedAtUtc: datetime,
+    Number:         int,
+    People:         dynamic
+)
+
+// JSON ingestion mapping for Astronauts
+.create-or-alter table Astronauts ingestion json mapping 'Astronauts_JSON_Mapping'
+```
+[
+    { "column": "CollectedAtUtc", "path": "$.CollectedAtUtc", "datatype": "datetime" },
+    { "column": "Number",         "path": "$.Number",         "datatype": "int"      },
+    { "column": "People",         "path": "$.People",         "datatype": "dynamic"  }
+]
+```
+
+
+// -----------------------------------------------------------------------------
+// 4. Verify setup (run after the Container App is running and sending data)
+// -----------------------------------------------------------------------------
+
+// Check ISS location data is flowing
+ISS_Loc
+| count
+
+// Check astronaut data is flowing
+Astronauts
+| count

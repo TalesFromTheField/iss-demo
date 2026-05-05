@@ -28,9 +28,9 @@ ISS_Loc
 
 // which humans are in space right now?
 Astronauts
-| top 1 by ['x-opt-enqueued-time']
-| mv-expand people
-| project Name= people.name, Craft=people.craft
+| top 1 by CollectedAtUtc
+| mv-expand people = People
+| project Name=people.name, Craft=people.craft
 
 
 

@@ -1,105 +1,52 @@
-"""Tests for Event Hubs authentication behavior in run.py."""
+"""Tests for Fabric streaming ingestion behavior in run.py."""
 
 import pytest
+from unittest.mock import MagicMock, patch
+
+import sys, os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 import run
 
 
-class _FakeBatch:
-    def add(self, _event):
-        return None
+class TestSendToFabric:
+    """Tests for the send_to_fabric function."""
+
+    def test_raises_when_ingestion_uri_not_set(self, monkeypatch):
+        monkeypatch.setattr(run, "FABRIC_INGESTION_URI", "")
+
+        with pytest.raises(RuntimeError, match="FabricIngestionUri"):
+            run.send_to_fabric("ISS_Loc", {"Latitude": 1.0, "Longitude": 2.0})
+
+    def test_uses_managed_identity(self, monkeypatch):
+        monkeypatch.setattr(run, "FABRIC_INGESTION_URI", "https://trd-test.z6.kusto.data.microsoft.com")
+
+        mock_client = MagicMock()
+        mock_client_cls = MagicMock(return_value=mock_client)
+        mock_kcsb = MagicMock()
+        monkeypatch.setattr(run, "KustoStreamingIngestClient", mock_client_cls)
+        monkeypatch.setattr(run, "KustoConnectionStringBuilder", mock_kcsb)
+
+        run.send_to_fabric("ISS_Loc", {"Latitude": 1.0, "Longitude": 2.0})
+
+        mock_kcsb.with_azure_token_credential.assert_called_once()
+        uri_arg = mock_kcsb.with_azure_token_credential.call_args[0][0]
+        assert uri_arg == "https://trd-test.z6.kusto.data.microsoft.com"
+        mock_client.ingest_from_stream.assert_called_once()
+
+    def test_ingests_to_correct_table(self, monkeypatch):
+        monkeypatch.setattr(run, "FABRIC_INGESTION_URI", "https://trd-test.z6.kusto.data.microsoft.com")
+        monkeypatch.setattr(run, "FABRIC_DATABASE_NAME", "test-db")
+
+        mock_client = MagicMock()
+        monkeypatch.setattr(run, "KustoStreamingIngestClient", MagicMock(return_value=mock_client))
+        monkeypatch.setattr(run, "KustoConnectionStringBuilder", MagicMock())
+
+        run.send_to_fabric("ISS_Loc", {"Latitude": 1.0})
+
+        _, kwargs = mock_client.ingest_from_stream.call_args
+        props = kwargs["ingestion_properties"]
+        assert props.table == "ISS_Loc"
+        assert props.database == "test-db"
 
 
-class _FakeProducer:
-    def __init__(self):
-        self.sent = False
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc, tb):
-        return False
-
-    def create_batch(self):
-        return _FakeBatch()
-
-    def send_batch(self, _batch):
-        self.sent = True
-
-
-@pytest.fixture(autouse=True)
-def _restore_globals():
-    original_fqdn = run.EVENT_HUB_NAMESPACE_FQDN
-    original_conn = run.EVENT_HUB_CONNECTION_STRING
-    yield
-    run.EVENT_HUB_NAMESPACE_FQDN = original_fqdn
-    run.EVENT_HUB_CONNECTION_STRING = original_conn
-
-
-def test_send_to_event_hub_uses_managed_identity(monkeypatch):
-    run.EVENT_HUB_NAMESPACE_FQDN = "evhnsissdemo.servicebus.windows.net"
-    run.EVENT_HUB_CONNECTION_STRING = "Endpoint=sb://ignored/;SharedAccessKeyName=a;SharedAccessKey=b"
-
-    fake_producer = _FakeProducer()
-
-    credential_called = {"value": False}
-
-    def fake_credential(*args, **kwargs):
-        credential_called["value"] = True
-        return object()
-
-    class _FakeEventHubProducerClient:
-        def __init__(self, **kwargs):
-            assert kwargs["fully_qualified_namespace"] == "evhnsissdemo.servicebus.windows.net"
-            assert kwargs["eventhub_name"] == "iss-location"
-            assert "credential" in kwargs
-
-        @staticmethod
-        def from_connection_string(*args, **kwargs):
-            pytest.fail("SAS auth should not be used when namespace is configured")
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, tb):
-            return False
-
-        def create_batch(self):
-            return _FakeBatch()
-
-        def send_batch(self, _batch):
-            fake_producer.sent = True
-
-    monkeypatch.setattr(run, "DefaultAzureCredential", fake_credential)
-    monkeypatch.setattr(run, "EventHubProducerClient", _FakeEventHubProducerClient)
-
-    run.send_to_event_hub("iss-location", "{}")
-
-    assert credential_called["value"] is True
-    assert fake_producer.sent is True
-
-
-def test_send_to_event_hub_falls_back_to_connection_string(monkeypatch):
-    run.EVENT_HUB_NAMESPACE_FQDN = ""
-    run.EVENT_HUB_CONNECTION_STRING = "Endpoint=sb://evhnsissdemo.servicebus.windows.net/;SharedAccessKeyName=Root;SharedAccessKey=key"
-
-    fake_producer = _FakeProducer()
-
-    def fake_from_conn(conn_str, eventhub_name):
-        assert conn_str.startswith("Endpoint=sb://evhnsissdemo.servicebus.windows.net")
-        assert eventhub_name == "astronauts"
-        return fake_producer
-
-    monkeypatch.setattr(run.EventHubProducerClient, "from_connection_string", fake_from_conn)
-
-    run.send_to_event_hub("astronauts", "{}")
-
-    assert fake_producer.sent is True
-
-
-def test_send_to_event_hub_raises_when_no_auth_config(monkeypatch):
-    run.EVENT_HUB_NAMESPACE_FQDN = ""
-    run.EVENT_HUB_CONNECTION_STRING = ""
-
-    with pytest.raises(RuntimeError):
-        run.send_to_event_hub("iss-location", "{}")

@@ -11,30 +11,25 @@ Polls the [Open Notify API](http://open-notify.org/Open-Notify-API/) for:
 - **ISS position** (`iss-now.json`) — latitude/longitude/timestamp, every 5 seconds
 - **Astronaut info** (`astros.json`) — people in space and their craft, every 1 minute
 
-Data flows through Azure Event Hubs into Microsoft Fabric EventStreams, landing in a KQL Database for ad-hoc analysis and a Power BI dashboard for real-time visualization.
+Data flows directly from the Container App via Kusto streaming ingestion into a KQL Database for ad-hoc analysis and a Power BI dashboard for real-time visualization. Azure Event Hubs was removed to eliminate the key-based authentication requirement.
 
 ### Architecture
 
 ```
-Azure Functions (Python, Timer triggers)
-  ├─ GetIssLocation  (every 5s) → Event Hub: iss-location
-  └─ GetAstronauts   (every 1m) → Event Hub: astronauts
-        │
-        ▼
-Fabric EventStreams (2x, one per hub)
-        │
-        ▼
-KQL Database (tables: ISS_Loc, Astronauts)
-        │
-        ▼
-Power BI Dashboard (auto-refresh every 5s)
+Azure Container App (Python, APScheduler)
+  ├─ job_get_iss_location  (every 5s)  ──┐
+  └─ job_get_astronauts    (every 1m)  ──┤
+                                         │ Kusto streaming ingestion
+                                         ▼
+                              KQL Database (tables: ISS_Loc, Astronauts)
+                                         │
+                                         ▼
+                              Power BI Dashboard (auto-refresh every 5s)
 ```
 
 ### Tech Stack
-- **Ingestion:** Azure Functions (Python v2 programming model, timer triggers)
-- **Messaging:** Azure Event Hubs (2 hubs in one namespace)
-- **Streaming:** Microsoft Fabric EventStreams
-- **Storage/Analytics:** Microsoft Fabric KQL Database + KQL Queryset
+- **Ingestion:** Azure Container App (Python, APScheduler), streaming directly to Fabric
+- **Storage/Analytics:** Microsoft Fabric KQL Database + KQL Queryset (Eventhouse)
 - **Visualization:** Power BI (`.pbix` report connected to KQL DB)
 - **Infrastructure as Code:** Bicep (modular structure under `infra/`)
 - **CI/CD:** GitHub Actions (OIDC auth, `dev` environment)
@@ -43,13 +38,15 @@ Power BI Dashboard (auto-refresh every 5s)
 - **AI Framework:** Teamwork (agents, skills, instructions)
 
 ### Key Decisions
-- **Azure Functions replaces Logic Apps** — Logic Apps were the original ingestion service (scheduled HTTP polling + Event Hub forwarding). Functions are cheaper, code-first, and easier to version-control/test.
-- **Python v2 model** — decorator-based, single `function_app.py` file, readable for the data analytics audience.
-- **Bicep over Terraform** — Azure-native, simpler for a single-cloud solution.
-- **Deploy to Azure button for public users** — the primary deployment path for the public (Tales From the Field viewers) is the one-click Deploy to Azure portal button. It deploys `infra/main.bicep` and pulls the pre-built Container App image from GHCR. No local tooling or GitHub fork required.
-- **GitHub Actions CD is for maintainers only** — OIDC-based CD workflow exists for the core team to push infrastructure updates. It is NOT the intended path for public/demo users.
-- **Local scripts for Fabric** — `scripts/deploy-fabric.ps1` (Windows) and `scripts/deploy-fabric.sh` (Mac/Linux) automate Fabric resource creation for users who prefer CLI over portal.
-- **Fabric resources are NOT deployed by IaC** — EventStreams, KQL Database, and Power BI are workspace items that require Fabric REST APIs or portal setup. Documented in `docs/fabric-setup.md`.
+- **Azure Event Hubs removed** — original architecture used Event Hubs + Fabric EventStreams for ingestion. Removed because key-based authentication was unavailable and managed identity for Fabric EventStreams is not straightforward. Replaced with direct Kusto streaming ingestion from the Container App using `azure-kusto-ingest` + managed identity via `DefaultAzureCredential`.
+- **Direct Fabric streaming ingestion** — the Container App uses `KustoStreamingIngestClient` from `azure-kusto-ingest` to write directly to KQL Database tables. Auth is via Container App system-assigned managed identity (`DefaultAzureCredential`). The Eventhouse Query URI (`queryServiceUri`) must be set as the `FabricIngestionUri` environment variable.
+- **KQL table schema in `kql/schema.kql`** — tables (`ISS_Loc`, `Astronauts`) and streaming ingestion policy must be created manually via the Fabric portal KQL editor before the Container App can ingest. Run `kql/schema.kql` once after `deploy-fabric.ps1/sh`.
+- **Azure Functions replaces Logic Apps** — Logic Apps were the original ingestion service. Functions are cheaper and code-first.
+- **Container App replaced Azure Functions runtime** — `run.py` uses APScheduler so the same fetch logic runs in a Container App environment without the Functions host.
+- **Deploy to Azure button for public users** — the primary deployment path for the public is the one-click Deploy to Azure portal button. It deploys `infra/main.bicep` and pulls the pre-built Container App image from GHCR.
+- **GitHub Actions CD is for maintainers only** — OIDC-based CD workflow for the core team. NOT the intended path for public/demo users.
+- **Local scripts for Fabric** — `scripts/deploy-fabric.ps1` (Windows) and `scripts/deploy-fabric.sh` (Mac/Linux) automate Fabric resource creation. They output the `FabricIngestionUri` to set on the Container App.
+- **Fabric resources are NOT deployed by IaC** — KQL Database is a Fabric workspace item. Documented in `docs/fabric-setup.md`.
 
 ### Repository Structure
 ```

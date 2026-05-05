@@ -16,18 +16,14 @@ param location string = resourceGroup().location
 @description('Optional container image URI override. Leave blank to deploy ghcr.io/talesfromthefield/iss-demo:latest.')
 param containerImageUri string = ''
 
+@description('Eventhouse Query URI from the Fabric portal (e.g. https://trd-xxxx.z6.kusto.data.microsoft.com). Obtained after running scripts/deploy-fabric.ps1.')
+param fabricIngestionUri string = ''
+
+@description('Fabric KQL Database name to ingest data into.')
+param fabricDatabaseName string = 'iss-demo-kqldb'
+
 // Normalize user-provided environment names for resource naming safety.
 var normalizedEnvironmentName = toLower(replace(replace(replace(environmentName, ' ', '-'), '_', '-'), '.', '-'))
-
-// ── Module: Event Hubs ──────────────────────────────────────────────────────
-
-module eventHubs 'modules/event-hubs.bicep' = {
-  name: 'event-hubs'
-  params: {
-    environmentName: normalizedEnvironmentName
-    location: location
-  }
-}
 
 // ── Module: Monitoring (base — Log Analytics + App Insights) ────────────────
 
@@ -51,13 +47,9 @@ module containerRegistry 'modules/container-registry.bicep' = {
 
 // ── Module: Container App ──────────────────────────────────────────────────
 
-// Determine effective image URI (use provided image or default to published GHCR image)
-var effectiveImageUri = !empty(containerImageUri) 
-  ? containerImageUri 
+var effectiveImageUri = !empty(containerImageUri)
+  ? containerImageUri
   : 'ghcr.io/talesfromthefield/iss-demo:latest'
-
-// Event Hubs namespace name is deterministic from environmentName in event-hubs module.
-var eventHubNamespaceName = eventHubs.outputs.namespaceName
 
 module containerApp 'modules/container-app.bicep' = {
   name: 'container-app'
@@ -65,9 +57,8 @@ module containerApp 'modules/container-app.bicep' = {
     environmentName: normalizedEnvironmentName
     location: location
     appInsightsConnectionString: monitoring.outputs.appInsightsConnectionString
-    issLocationHubName: eventHubs.outputs.issLocationHubName
-    astronautsHubName: eventHubs.outputs.astronautsHubName
-    eventHubNamespaceName: eventHubNamespaceName
+    fabricIngestionUri: fabricIngestionUri
+    fabricDatabaseName: fabricDatabaseName
     containerImageUri: effectiveImageUri
   }
 }
@@ -78,16 +69,11 @@ module roleAssignments 'modules/role-assignments.bicep' = {
   name: 'role-assignments'
   params: {
     principalId: containerApp.outputs.containerAppPrincipalId
-    eventHubNamespaceResourceId: resourceId('Microsoft.EventHub/namespaces', eventHubNamespaceName)
-    eventHubNamespaceName: eventHubNamespaceName
     acrResourceId: containerRegistry.outputs.registryResourceId
   }
 }
 
 // ── Outputs ─────────────────────────────────────────────────────────────────
-
-@description('Fully qualified domain name of the Event Hubs namespace.')
-output eventHubNamespaceFqdn string = eventHubs.outputs.namespaceFqdn
 
 @description('Name of the deployed Container App.')
 output containerAppName string = containerApp.outputs.containerAppName
@@ -98,5 +84,3 @@ output containerImageUri string = effectiveImageUri
 @description('Container Registry login server.')
 output acrLoginServer string = containerRegistry.outputs.loginServer
 
-// App Insights connection string intentionally omitted from outputs
-// to avoid exposing sensitive values in ARM deployment history.

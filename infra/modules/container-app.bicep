@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
 // Module: Container App infrastructure for ISS Demo
 // Provisions a Container App Environment and Container App resource
-// running the ISS Demo scheduler.
+// running the ISS Demo scheduler, which streams directly to Fabric.
 // ---------------------------------------------------------------------------
 
 // ── Parameters ──────────────────────────────────────────────────────────────
@@ -15,16 +15,19 @@ param location string
 @description('Application Insights connection string for telemetry.')
 param appInsightsConnectionString string
 
-@description('Name of the ISS location Event Hub.')
-param issLocationHubName string = 'iss-location'
+@description('Eventhouse Query URI from the Fabric portal. Set after running deploy-fabric scripts.')
+param fabricIngestionUri string = ''
 
-@description('Name of the astronauts Event Hub.')
-param astronautsHubName string = 'astronauts'
+@description('Fabric KQL Database name to ingest data into.')
+param fabricDatabaseName string = 'iss-demo-kqldb'
 
-@description('Name of the Event Hubs namespace used for fallback connection-string lookup.')
-param eventHubNamespaceName string
+@description('KQL table name for ISS location records.')
+param fabricIssTable string = 'ISS_Loc'
 
-@description('Container image URI (e.g., acrissdev.azurecr.io/iss-demo:latest).')
+@description('KQL table name for astronaut records.')
+param fabricAstronautsTable string = 'Astronauts'
+
+@description('Container image URI (e.g., ghcr.io/talesfromthefield/iss-demo:latest).')
 param containerImageUri string
 
 // ── Variables ───────────────────────────────────────────────────────────────
@@ -33,12 +36,6 @@ var normalizedEnvironmentName = toLower(replace(replace(replace(environmentName,
 var containerAppEnvName = 'cae-iss-${normalizedEnvironmentName}'
 var containerAppName = 'ca-iss-${normalizedEnvironmentName}'
 var logAnalyticsWorkspaceName = 'law-iss-${normalizedEnvironmentName}'
-var eventHubNamespaceFqdn = '${eventHubNamespaceName}.servicebus.windows.net'
-
-// ── Outputs (for querying Log Analytics) ────────────────────────────────────
-
-// Note: In a full implementation, we would query the existing Log Analytics workspace
-// and pass its resource ID. For now, we'll rely on the monitoring module to provide it.
 
 // ── Container App Environment ───────────────────────────────────────────────
 
@@ -84,16 +81,20 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
           name: 'iss-demo-scheduler'
           env: [
             {
-              name: 'EventHubNamespaceFqdn'
-              value: eventHubNamespaceFqdn
+              name: 'FabricIngestionUri'
+              value: fabricIngestionUri
             }
             {
-              name: 'IssLocationHubName'
-              value: issLocationHubName
+              name: 'FabricDatabaseName'
+              value: fabricDatabaseName
             }
             {
-              name: 'AstronautsHubName'
-              value: astronautsHubName
+              name: 'FabricIssTable'
+              value: fabricIssTable
+            }
+            {
+              name: 'FabricAstronautsTable'
+              value: fabricAstronautsTable
             }
             {
               name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'

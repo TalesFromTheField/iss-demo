@@ -296,52 +296,32 @@ else
     ok "KQL Database created: $KQLDB_ID"
 fi
 
-# -- Create EventStreams ----------------------------------------------------
+# -- Fetch KQL Database Query URI -------------------------------------------
 
-declare -A EVENTSTREAM_IDS
+info "Fetching KQL Database properties to get Fabric Ingestion URI..."
+KQLDB_PROPS=$(fab api -X get "workspaces/$WORKSPACE_ID/kqlDatabases/$KQLDB_ID" $VERBOSE 2>&1)
 
-for ES_NAME in "iss-location-eventstream" "astronauts-eventstream"; do
-    info "Creating EventStream '$ES_NAME'..."
+FABRIC_QUERY_URI=""
+if command -v python3 >/dev/null 2>&1; then
+    FABRIC_QUERY_URI=$(echo "$KQLDB_PROPS" | python3 -c "
+import sys,json
+data=json.load(sys.stdin)
+props=data.get('text',data).get('properties',{})
+print(props.get('queryServiceUri',''))" 2>/dev/null)
+elif command -v python >/dev/null 2>&1; then
+    FABRIC_QUERY_URI=$(echo "$KQLDB_PROPS" | python -c "
+import sys,json
+data=json.load(sys.stdin)
+props=data.get('text',data).get('properties',{})
+print(props.get('queryServiceUri',''))" 2>/dev/null)
+fi
 
-    ES_RESPONSE=$(fab api -X post \
-        "workspaces/$WORKSPACE_ID/eventstreams" \
-        -i "{\"displayName\": \"$ES_NAME\", \"description\": \"EventStream for ISS Demo - $ES_NAME.\"}" \
-        $VERBOSE 2>&1) || {
-        err "Failed to create EventStream '$ES_NAME'."
-        err "$ES_RESPONSE"
-        exit 1
-    }
-
-    ES_ID=$(json_field "$ES_RESPONSE" "id")
-
-    if [[ -z "$ES_ID" ]]; then
-        if is_conflict "$ES_RESPONSE"; then
-            warn "EventStream '$ES_NAME' already exists — looking up existing ID..."
-            ES_ID=$(get_existing_id "workspaces/$WORKSPACE_ID/eventstreams" "$ES_NAME")
-            if [[ -z "$ES_ID" ]]; then
-                err "Could not find existing EventStream '$ES_NAME' in workspace."
-                exit 1
-            fi
-            ok "Using existing EventStream: $ES_ID ($ES_NAME)"
-        elif is_accepted "$ES_RESPONSE"; then
-            info "EventStream creation accepted (async) — polling until ready..."
-            ES_ID=$(wait_for_resource_id "workspaces/$WORKSPACE_ID/eventstreams" "$ES_NAME")
-            if [[ -z "$ES_ID" ]]; then
-                err "Timed out waiting for EventStream '$ES_NAME' to be provisioned."
-                exit 1
-            fi
-            ok "EventStream ready: $ES_ID ($ES_NAME)"
-        else
-            err "Could not extract EventStream ID from response:"
-            err "$ES_RESPONSE"
-            exit 1
-        fi
-    else
-        ok "EventStream created: $ES_ID ($ES_NAME)"
-    fi
-
-    EVENTSTREAM_IDS[$ES_NAME]="$ES_ID"
-done
+if [[ -z "$FABRIC_QUERY_URI" ]]; then
+    warn "Could not auto-detect Fabric Ingestion URI from API response."
+    warn "Open the KQL Database in the Fabric portal and copy the Query URI."
+else
+    ok "Fabric Ingestion URI detected: $FABRIC_QUERY_URI"
+fi
 
 # -- Summary ----------------------------------------------------------------
 
@@ -350,33 +330,36 @@ echo "======================================================================"
 echo "  ISS DEMO - FABRIC RESOURCE DEPLOYMENT SUMMARY"
 echo "======================================================================"
 echo ""
-echo "  Workspace ID:  $WORKSPACE_ID"
+echo "  Workspace ID   : $WORKSPACE_ID"
+echo "  Eventhouse     : $EVENTHOUSE_ID  ($EVENTHOUSE_NAME)"
+echo "  KQL Database   : $KQLDB_ID  ($KQLDB_NAME)"
 echo ""
-echo "  Created resources:"
-echo "     Eventhouse      : $EVENTHOUSE_ID  ($EVENTHOUSE_NAME)"
-echo "     KQL Database    : $KQLDB_ID  ($KQLDB_NAME)"
-for ES_NAME in "${!EVENTSTREAM_IDS[@]}"; do
-    echo "     EventStream     : ${EVENTSTREAM_IDS[$ES_NAME]}  ($ES_NAME)"
-done
+
+if [[ -n "$FABRIC_QUERY_URI" ]]; then
+    echo "  *** IMPORTANT — set this environment variable on your Container App: ***"
+    echo ""
+    echo "  FabricIngestionUri = $FABRIC_QUERY_URI"
+    echo ""
+    echo "  Azure CLI (update existing Container App):"
+    echo "    az containerapp update --name <app-name> --resource-group <rg> \\"
+    echo "      --set-env-vars FabricIngestionUri=$FABRIC_QUERY_URI"
+else
+    echo "  *** IMPORTANT — get the Fabric Ingestion URI manually: ***"
+    echo ""
+    echo "  1. Open the Fabric portal: https://app.fabric.microsoft.com"
+    echo "  2. Navigate to your KQL Database: $KQLDB_NAME"
+    echo "  3. Copy the 'Query URI' (looks like https://trd-xxx.region.kusto.data.microsoft.com)"
+    echo "  4. Set it as the FabricIngestionUri env var on your Container App"
+fi
+
 echo ""
-echo "  MANUAL STEPS REQUIRED:"
+echo "  NEXT STEPS:"
 echo "  ------------------------------------------------------"
-echo "  The EventStream-to-KQL DB data connection cannot be"
-echo "  fully automated via API. Complete these steps in the"
-echo "  Fabric portal (https://app.fabric.microsoft.com):"
+echo "  1. Run kql/schema.kql in the Fabric KQL Database editor to create tables"
 echo ""
-echo "  1. Open 'iss-location-eventstream'"
-echo "     a. Add source -> Azure Event Hub -> iss-location hub"
-echo "     b. Add destination -> KQL Database -> $KQLDB_NAME"
-echo "     c. Map to table: ISS_Loc"
-echo ""
-echo "  2. Open 'astronauts-eventstream'"
-echo "     a. Add source -> Azure Event Hub -> astronauts hub"
-echo "     b. Add destination -> KQL Database -> $KQLDB_NAME"
-echo "     c. Map to table: Astronauts"
+echo "  2. Set FabricIngestionUri on your Container App (see above)"
 echo ""
 echo "  3. Verify data is flowing:"
-echo "     Open the KQL Database and run:"
 echo "       ISS_Loc | count"
 echo "       Astronauts | count"
 echo ""
@@ -384,4 +367,5 @@ echo "  For detailed instructions, see: docs/fabric-setup.md"
 echo "======================================================================"
 echo ""
 
-info "Deployment complete. See manual steps above."
+info "Deployment complete. See next steps above."
+

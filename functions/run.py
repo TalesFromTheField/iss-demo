@@ -1,9 +1,11 @@
 """Container entry point for ISS Demo scheduler.
 
 Runs timer-triggered functions using APScheduler instead of Azure Functions runtime.
-This enables the same function code to run in a Container App environment.
+Fetches ISS location and astronaut data and streams events directly to a
+Microsoft Fabric KQL Database (Eventhouse) via the Kusto streaming ingestion API.
 """
 
+import io
 import json
 import logging
 import os
@@ -14,7 +16,9 @@ from datetime import datetime, timezone
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from azure.identity import DefaultAzureCredential
-from azure.eventhub import EventData, EventHubProducerClient
+from azure.kusto.data import KustoConnectionStringBuilder
+from azure.kusto.ingest import KustoStreamingIngestClient, IngestionProperties
+from azure.kusto.ingest.ingestion_properties import DataFormat
 from function_app import (
     ISS_LOCATION_URL,
     ASTRONAUTS_URL,
@@ -28,75 +32,81 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Environment configuration
-EVENT_HUB_NAMESPACE_FQDN = os.environ.get("EventHubNamespaceFqdn")
-EVENT_HUB_CONNECTION_STRING = os.environ.get("EventHubConnection")
-ISS_LOCATION_HUB_NAME = os.environ.get("IssLocationHubName", "iss-location")
-ASTRONAUTS_HUB_NAME = os.environ.get("AstronautsHubName", "astronauts")
+# Fabric configuration — set via Container App environment variables.
+# FabricIngestionUri: the Eventhouse Query URI from the Fabric portal
+#   (e.g. https://trd-xxxxxxxxxxxx.z6.kusto.data.microsoft.com)
+FABRIC_INGESTION_URI = os.environ.get("FabricIngestionUri")
+FABRIC_DATABASE_NAME = os.environ.get("FabricDatabaseName", "iss-demo-kqldb")
+FABRIC_ISS_TABLE = os.environ.get("FabricIssTable", "ISS_Loc")
+FABRIC_ASTRONAUTS_TABLE = os.environ.get("FabricAstronautsTable", "Astronauts")
 
-def send_to_event_hub(hub_name: str, message: str) -> None:
-    """Send a message to an Event Hub."""
-    if EVENT_HUB_NAMESPACE_FQDN:
-        credential = DefaultAzureCredential(exclude_interactive_browser_credential=True)
-        producer = EventHubProducerClient(
-            fully_qualified_namespace=EVENT_HUB_NAMESPACE_FQDN,
-            eventhub_name=hub_name,
-            credential=credential,
-        )
-    elif EVENT_HUB_CONNECTION_STRING:
-        producer = EventHubProducerClient.from_connection_string(
-            EVENT_HUB_CONNECTION_STRING,
-            eventhub_name=hub_name,
-        )
-    else:
+
+def _get_ingest_client() -> KustoStreamingIngestClient:
+    """Return a Kusto streaming ingest client authenticated via managed identity."""
+    if not FABRIC_INGESTION_URI:
         raise RuntimeError(
-            "Missing Event Hub configuration. Set EventHubNamespaceFqdn for managed identity auth."
+            "Missing Fabric configuration. Set the FabricIngestionUri environment variable "
+            "to the Eventhouse Query URI from the Fabric portal."
         )
+    kcsb = KustoConnectionStringBuilder.with_azure_token_credential(
+        FABRIC_INGESTION_URI,
+        DefaultAzureCredential(exclude_interactive_browser_credential=True),
+    )
+    return KustoStreamingIngestClient(kcsb)
 
-    with producer:
-        batch = producer.create_batch()
-        batch.add(EventData(message))
-        producer.send_batch(batch)
+
+def send_to_fabric(table: str, record: dict) -> None:
+    """Send a single JSON record to a Fabric KQL Database table via streaming ingestion."""
+    client = _get_ingest_client()
+    properties = IngestionProperties(
+        database=FABRIC_DATABASE_NAME,
+        table=table,
+        data_format=DataFormat.JSON,
+    )
+    stream = io.BytesIO(json.dumps(record).encode("utf-8"))
+    client.ingest_from_stream(stream, ingestion_properties=properties)
 
 
 def job_get_iss_location() -> None:
-    """Scheduled job: Fetch ISS location every 5 seconds."""
+    """Scheduled job: fetch ISS location every 5 seconds and stream to Fabric."""
     try:
         response = _fetch_with_retry(ISS_LOCATION_URL, timeout=10, retries=1, backoff=2)
         iss_data = response.json()
+        position = iss_data.get("iss_position", {})
 
-        event = {
-            "schemaVersion": "1.0",
-            "eventType": "iss-location",
-            "collectedAtUtc": datetime.now(timezone.utc).isoformat(),
-            "data": iss_data,
+        record = {
+            "Timestamp": datetime.fromtimestamp(
+                iss_data.get("timestamp", 0), tz=timezone.utc
+            ).isoformat(),
+            "CollectedAtUtc": datetime.now(timezone.utc).isoformat(),
+            "Latitude": float(position.get("latitude", 0)),
+            "Longitude": float(position.get("longitude", 0)),
         }
 
-        send_to_event_hub(ISS_LOCATION_HUB_NAME, json.dumps(event))
+        send_to_fabric(FABRIC_ISS_TABLE, record)
         logger.info(
-            "ISS location event sent: lat=%s, lon=%s",
-            iss_data.get("iss_position", {}).get("latitude", "?"),
-            iss_data.get("iss_position", {}).get("longitude", "?"),
+            "ISS location sent to Fabric: lat=%s, lon=%s",
+            record["Latitude"],
+            record["Longitude"],
         )
     except Exception as exc:
         logger.error("Error in job_get_iss_location: %s", exc, exc_info=True)
 
 
 def job_get_astronauts() -> None:
-    """Scheduled job: Fetch astronauts every minute."""
+    """Scheduled job: fetch astronauts in space every minute and stream to Fabric."""
     try:
         response = _fetch_with_retry(ASTRONAUTS_URL, timeout=10, retries=1, backoff=2)
         astro_data = response.json()
 
-        event = {
-            "schemaVersion": "1.0",
-            "eventType": "astronauts",
-            "collectedAtUtc": datetime.now(timezone.utc).isoformat(),
-            "data": astro_data,
+        record = {
+            "CollectedAtUtc": datetime.now(timezone.utc).isoformat(),
+            "Number": astro_data.get("number", 0),
+            "People": astro_data.get("people", []),
         }
 
-        send_to_event_hub(ASTRONAUTS_HUB_NAME, json.dumps(event))
-        logger.info("Astronauts event sent: %d people in space", astro_data.get("number", 0))
+        send_to_fabric(FABRIC_ASTRONAUTS_TABLE, record)
+        logger.info("Astronauts sent to Fabric: %d people in space", record["Number"])
     except Exception as exc:
         logger.error("Error in job_get_astronauts: %s", exc, exc_info=True)
 
@@ -104,14 +114,11 @@ def job_get_astronauts() -> None:
 def main() -> None:
     """Start the scheduler and run jobs indefinitely."""
     logger.info("Starting ISS Demo scheduler...")
+    logger.info("Fabric ingestion URI: %s", FABRIC_INGESTION_URI or "(not set)")
+    logger.info("Fabric database: %s", FABRIC_DATABASE_NAME)
 
     scheduler = BackgroundScheduler()
-
-    # Schedule jobs to match the original timer triggers
-    # ISS location: every 5 seconds
     scheduler.add_job(job_get_iss_location, "interval", seconds=5, id="iss-location")
-
-    # Astronauts: every 60 seconds
     scheduler.add_job(job_get_astronauts, "interval", seconds=60, id="astronauts")
 
     scheduler.start()
@@ -123,12 +130,10 @@ def main() -> None:
         scheduler.shutdown()
         sys.exit(0)
 
-    # Register signal handlers for graceful shutdown in Container Apps
     signal.signal(signal.SIGTERM, signal_handler)
     signal.signal(signal.SIGINT, signal_handler)
 
     try:
-        # Keep the main thread alive
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
@@ -139,3 +144,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

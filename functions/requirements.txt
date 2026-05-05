@@ -1,5 +1,6 @@
 azure-functions==1.21.3
-azure-eventhub>=5.11.0,<6
 azure-identity>=1.17.1,<2
+azure-kusto-data>=4.4.0,<5
+azure-kusto-ingest>=4.4.0,<5
 apscheduler>=3.10.0,<4
 requests>=2.32.3,<3

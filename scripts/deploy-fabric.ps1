@@ -234,7 +234,7 @@ if (-not $eventhouseId) {
 Write-Info "Creating KQL Database '$KqlDbName'..."
 $kqlDbPayload = (@{
         displayName     = $KqlDbName
-        description     = 'KQL Database for ISS Demo - stores ISS_Loc and Astronauts tables ingested via EventStreams.'
+        description     = 'KQL Database for ISS Demo - stores ISS_Loc and Astronauts tables for real-time ISS tracking.'
         creationPayload = @{
             databaseType           = 'ReadWrite'
             parentEventhouseItemId = $eventhouseId
@@ -279,53 +279,27 @@ if (-not $kqlDbId) {
     Write-Ok "KQL Database created: $kqlDbId"
 }
 
-$eventStreamIds = [ordered]@{}
-foreach ($eventStreamName in @('iss-location-eventstream', 'astronauts-eventstream')) {
-    Write-Info "Creating EventStream '$eventStreamName'..."
-    $eventStreamPayload = (@{
-            displayName = $eventStreamName
-            description = "EventStream for ISS Demo - $eventStreamName."
-        } | ConvertTo-Json -Compress)
+# -- Fetch KQL Database Query URI -------------------------------------------
 
-    try {
-        $eventStreamResponse = Invoke-FabApi -Path "workspaces/$WorkspaceId/eventstreams" -Payload $eventStreamPayload
-    }
-    catch {
-        Write-Err "Failed to create EventStream '$eventStreamName'."
-        Write-Err $_.Exception.Message
-        exit 1
-    }
+Write-Info "Fetching KQL Database properties to get Fabric Ingestion URI..."
+$kqlDbArgs = @('api', '-X', 'get', "workspaces/$WorkspaceId/kqlDatabases/$kqlDbId")
+if ($CliVerbose) { $kqlDbArgs += '--verbose' }
+$kqlDbPropsRaw = Invoke-Fab -Arguments $kqlDbArgs -AllowFailure
+$kqlDbProps = $kqlDbPropsRaw | ConvertFrom-Json
 
-    $eventStream = $eventStreamResponse | ConvertFrom-Json
-    $eventStreamId = Get-FabResourceId -Response $eventStream
+$fabricQueryUri = $null
+if ($kqlDbProps.PSObject.Properties.Name -contains 'text' -and $kqlDbProps.text) {
+    $fabricQueryUri = $kqlDbProps.text.properties.queryServiceUri
+}
+if (-not $fabricQueryUri -and $kqlDbProps.PSObject.Properties.Name -contains 'properties') {
+    $fabricQueryUri = $kqlDbProps.properties.queryServiceUri
+}
 
-    if (-not $eventStreamId) {
-        if (Test-IsConflict -Response $eventStream) {
-            Write-WarnMsg "EventStream '$eventStreamName' already exists — looking up existing ID..."
-            $eventStreamId = Get-ExistingFabId -ListPath "workspaces/$WorkspaceId/eventstreams" -DisplayName $eventStreamName
-            if (-not $eventStreamId) {
-                Write-Err "Could not find existing EventStream '$eventStreamName' in workspace."
-                exit 1
-            }
-            Write-Ok "Using existing EventStream: $eventStreamId ($eventStreamName)"
-        } elseif (Test-IsAccepted -Response $eventStream) {
-            Write-Info "EventStream creation accepted (async) — polling until ready..."
-            $eventStreamId = Wait-FabResourceId -ListPath "workspaces/$WorkspaceId/eventstreams" -DisplayName $eventStreamName
-            if (-not $eventStreamId) {
-                Write-Err "Timed out waiting for EventStream '$eventStreamName' to be provisioned."
-                exit 1
-            }
-            Write-Ok "EventStream ready: $eventStreamId ($eventStreamName)"
-        } else {
-            Write-Err 'Could not extract EventStream ID from response:'
-            Write-Err $eventStreamResponse
-            exit 1
-        }
-    } else {
-        Write-Ok "EventStream created: $eventStreamId ($eventStreamName)"
-    }
-
-    $eventStreamIds[$eventStreamName] = $eventStreamId
+if (-not $fabricQueryUri) {
+    Write-WarnMsg "Could not auto-detect Fabric Ingestion URI from API response."
+    Write-WarnMsg "Open the KQL Database in the Fabric portal and copy the Query URI."
+} else {
+    Write-Ok "Fabric Ingestion URI detected: $fabricQueryUri"
 }
 
 Write-Host ''
@@ -333,33 +307,36 @@ Write-Host '====================================================================
 Write-Host '  ISS DEMO - FABRIC RESOURCE DEPLOYMENT SUMMARY'
 Write-Host '======================================================================'
 Write-Host ''
-Write-Host "  Workspace ID:  $WorkspaceId"
+Write-Host "  Workspace ID   : $WorkspaceId"
+Write-Host "  Eventhouse     : $eventhouseId  ($EventhouseName)"
+Write-Host "  KQL Database   : $kqlDbId  ($KqlDbName)"
 Write-Host ''
-Write-Host '  Created resources:'
-Write-Host "     Eventhouse      : $eventhouseId  ($EventhouseName)"
-Write-Host "     KQL Database    : $kqlDbId  ($KqlDbName)"
-foreach ($entry in $eventStreamIds.GetEnumerator()) {
-    Write-Host "     EventStream     : $($entry.Value)  ($($entry.Key))"
+
+if ($fabricQueryUri) {
+    Write-Host '  *** IMPORTANT — set this environment variable on your Container App: ***'
+    Write-Host ''
+    Write-Host "  FabricIngestionUri = $fabricQueryUri"
+    Write-Host ''
+    Write-Host '  Azure CLI (update existing Container App):'
+    Write-Host "    az containerapp update --name <app-name> --resource-group <rg> \"
+    Write-Host "      --set-env-vars FabricIngestionUri=$fabricQueryUri"
+} else {
+    Write-Host '  *** IMPORTANT — get the Fabric Ingestion URI manually: ***'
+    Write-Host ''
+    Write-Host '  1. Open the Fabric portal: https://app.fabric.microsoft.com'
+    Write-Host "  2. Navigate to your KQL Database: $KqlDbName"
+    Write-Host '  3. Copy the "Query URI" (looks like https://trd-xxx.region.kusto.data.microsoft.com)'
+    Write-Host '  4. Set it as the FabricIngestionUri env var on your Container App'
 }
+
 Write-Host ''
-Write-Host '  MANUAL STEPS REQUIRED:'
+Write-Host '  NEXT STEPS:'
 Write-Host '  ------------------------------------------------------'
-Write-Host '  The EventStream-to-KQL DB data connection cannot be'
-Write-Host '  fully automated via API. Complete these steps in the'
-Write-Host '  Fabric portal (https://app.fabric.microsoft.com):'
+Write-Host '  1. Run kql/schema.kql in the Fabric KQL Database editor to create tables'
 Write-Host ''
-Write-Host "  1. Open 'iss-location-eventstream'"
-Write-Host '     a. Add source -> Azure Event Hub -> iss-location hub'
-Write-Host "     b. Add destination -> KQL Database -> $KqlDbName"
-Write-Host '     c. Map to table: ISS_Loc'
-Write-Host ''
-Write-Host "  2. Open 'astronauts-eventstream'"
-Write-Host '     a. Add source -> Azure Event Hub -> astronauts hub'
-Write-Host "     b. Add destination -> KQL Database -> $KqlDbName"
-Write-Host '     c. Map to table: Astronauts'
+Write-Host '  2. Set FabricIngestionUri on your Container App (see above)'
 Write-Host ''
 Write-Host '  3. Verify data is flowing:'
-Write-Host '     Open the KQL Database and run:'
 Write-Host '       ISS_Loc | count'
 Write-Host '       Astronauts | count'
 Write-Host ''
@@ -367,4 +344,4 @@ Write-Host '  For detailed instructions, see: docs/fabric-setup.md'
 Write-Host '======================================================================'
 Write-Host ''
 
-Write-Info 'Deployment complete. See manual steps above.'
+Write-Info 'Deployment complete. See next steps above.'
