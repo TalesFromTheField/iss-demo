@@ -42,13 +42,12 @@ err()   { echo -e "${RED}[ERROR]${NC} $*" >&2; }
 # -- Defaults -----------------------------------------------------------------
 
 FABRIC_WORKSPACE_NAME="${FABRIC_WORKSPACE_NAME:-iss-demo}"
-ADMIN_EMAIL="${ADMIN_EMAIL:-}"
 DEPLOY_PBI_REPORT="${DEPLOY_PBI_REPORT:-false}"
 
 # -- Validate required env vars -----------------------------------------------
 
 for var in FABRIC_CLIENT_ID FABRIC_CLIENT_SECRET FABRIC_TENANT_ID \
-           CONTAINER_APP_NAME AZURE_RESOURCE_GROUP; do
+           CONTAINER_APP_NAME AZURE_RESOURCE_GROUP ADMIN_EMAIL; do
     if [[ -z "${!var:-}" ]]; then
         err "Missing required environment variable: $var"
         exit 1
@@ -143,11 +142,10 @@ else
     exit 1
 fi
 
-# -- Grant Admin access to ADMIN_EMAIL (optional) -----------------------------
+# -- Grant Admin access to ADMIN_EMAIL ----------------------------------------
 
-if [[ -n "$ADMIN_EMAIL" ]]; then
-    info "Granting Admin access to '$ADMIN_EMAIL'..."
-    ADMIN_OBJECT_ID=""
+info "Granting Admin access to '$ADMIN_EMAIL'..."
+ADMIN_OBJECT_ID=""
 
     # Try az CLI user lookup (UAMI has Directory.Read if granted via Bicep)
     ADMIN_OBJECT_ID=$(az ad user show --id "$ADMIN_EMAIL" --query id -o tsv 2>/dev/null || echo "")
@@ -185,7 +183,6 @@ if [[ -n "$ADMIN_EMAIL" ]]; then
         warn "Could not resolve Entra object ID for '$ADMIN_EMAIL'."
         warn "Add Admin access manually in the Fabric portal: https://app.fabric.microsoft.com"
         warn "  Workspace: $FABRIC_WORKSPACE_NAME"
-    fi
 fi
 
 # -- Download and run deploy-fabric.sh ----------------------------------------

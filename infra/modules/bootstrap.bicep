@@ -39,8 +39,8 @@ param fabricClientId string
 @secure()
 param fabricClientSecret string
 
-@description('Optional email of a user or group to grant Admin access to the created Fabric workspace.')
-param adminEmail string = ''
+@description('Email address of the user or group to grant Admin access to the created Fabric workspace. Required so a human can access and manage the workspace after bootstrap.')
+param adminEmail string
 
 @description('Set to true to automatically deploy the Power BI report from PBI/ISS.pbix.')
 param deployPbiReport bool = false

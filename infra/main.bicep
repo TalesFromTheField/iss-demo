@@ -43,8 +43,8 @@ param fabricClientSecret string = ''
 @description('Display name for the Fabric workspace to create (e.g., "iss-demo"). The bootstrap will create it.')
 param fabricWorkspaceName string = 'iss-demo'
 
-@description('Optional email of a user or group to grant Admin access to the Fabric workspace.')
-param adminEmail string = ''
+@description('Email address of the user or group to grant Admin access to the Fabric workspace. Required so a human can access and manage the workspace after bootstrap.')
+param adminEmail string
 
 @description('Set to true to automatically deploy the Power BI report from PBI/ISS.pbix during bootstrap.')
 param deployPbiReport bool = false
