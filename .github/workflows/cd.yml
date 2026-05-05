@@ -13,19 +13,59 @@ on:
 permissions:
   id-token: write
   contents: read
+  packages: write
 
 env:
   AZURE_RESOURCE_GROUP: rg-iss-demo-dev
   AZURE_LOCATION: eastus2
+  IMAGE_REGISTRY: ghcr.io
 
 jobs:
+  build-image:
+    name: Build & Push Container Image
+    runs-on: ubuntu-latest
+    outputs:
+      image-uri: ${{ steps.image.outputs.uri }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Convert repository name to lowercase
+        id: repo
+        run: echo "name=$(echo ${{ github.repository }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.IMAGE_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.IMAGE_REGISTRY }}/${{ steps.repo.outputs.name }}:latest
+            ${{ env.IMAGE_REGISTRY }}/${{ steps.repo.outputs.name }}:${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
+      - name: Output image URI
+        id: image
+        run: echo "uri=${{ env.IMAGE_REGISTRY }}/${{ steps.repo.outputs.name }}:latest" >> $GITHUB_OUTPUT
+
   deploy-infra:
     name: Deploy Infrastructure
     runs-on: ubuntu-latest
+    needs: build-image
     environment: dev
     outputs:
       containerAppName: ${{ steps.deploy.outputs.containerAppName }}
-      acrLoginServer: ${{ steps.deploy.outputs.acrLoginServer }}
     steps:
       - uses: actions/checkout@v4
 
@@ -45,23 +85,27 @@ jobs:
 
       - name: Deploy Bicep
         id: deploy
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_ADMIN_EMAIL: ${{ secrets.AZURE_ADMIN_EMAIL }}
         run: |
-          PARAMS="environmentName=dev location=${{ env.AZURE_LOCATION }}"
-
-          # Use provided image URI if supplied via workflow_dispatch
-          if [ -n "${{ inputs.containerImageUri }}" ]; then
-            PARAMS="$PARAMS containerImageUri=${{ inputs.containerImageUri }}"
+          # Determine image URI: use workflow_dispatch input if provided, otherwise use image built above
+          IMAGE_URI="${{ inputs.containerImageUri }}"
+          if [ -z "$IMAGE_URI" ]; then
+            IMAGE_URI="${{ needs.build-image.outputs.image-uri }}"
           fi
 
           OUTPUT=$(az deployment group create \
             --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
             --template-file infra/main.bicep \
             --parameters infra/parameters/dev.bicepparam \
+                         containerImageUri="$IMAGE_URI" \
             --name "iss-demo-$(date +%Y%m%d-%H%M%S)" \
             --query "properties.outputs" -o json)
 
           echo "containerAppName=$(echo $OUTPUT | jq -r '.containerAppName.value // "ca-iss-dev"')" >> $GITHUB_OUTPUT
-          echo "acrLoginServer=$(echo $OUTPUT | jq -r '.acrLoginServer.value // ""')" >> $GITHUB_OUTPUT
 
   smoke-test:
     name: Smoke Test
@@ -107,27 +151,22 @@ jobs:
             echo "✅ $REPLICAS replica(s) running"
           fi
 
-      - name: Verify Event Hubs receiving events
+      - name: Verify data flowing to Fabric (wait for first events)
         run: |
-          echo "Waiting 60s for events to flow..."
-          sleep 60
+          echo "Waiting 90s for Container App to start streaming to Fabric..."
+          sleep 90
 
-          # Derive Event Hub namespace name from environment (matches naming in event-hubs.bicep)
-          NAMESPACE="evhns-iss-dev"
+          # Check Container App logs for successful Fabric ingestion
+          LOGS=$(az containerapp logs show \
+            --name "$CONTAINER_APP_NAME" \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --tail 50 2>/dev/null || echo "")
 
-          for HUB in "iss-location" "astronauts"; do
-            echo "Checking Event Hub: $HUB"
-            INCOMING=$(az monitor metrics list \
-              --resource "/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.AZURE_RESOURCE_GROUP }}/providers/Microsoft.EventHub/namespaces/$NAMESPACE/eventhubs/$HUB" \
-              --metric "IncomingMessages" \
-              --interval PT1M \
-              --query "value[0].timeseries[0].data[-1].total" -o tsv 2>/dev/null || echo "0")
-            echo "  Incoming messages for $HUB: ${INCOMING:-0}"
-            if [ "${INCOMING:-0}" = "0" ] || [ "${INCOMING:-0}" = "None" ]; then
-              echo "::warning::No incoming messages for $HUB yet — may need more warm-up time"
-            else
-              echo "  ✅ Events flowing to $HUB"
-            fi
-          done
+          if echo "$LOGS" | grep -q "send_to_fabric\|Ingested\|ISS_Loc\|Astronauts"; then
+            echo "✅ Fabric ingestion activity detected in Container App logs"
+          else
+            echo "::warning::No Fabric ingestion log entries found yet — app may still be warming up"
+            echo "Check Container App logs manually: az containerapp logs show --name $CONTAINER_APP_NAME --resource-group ${{ env.AZURE_RESOURCE_GROUP }}"
+          fi
 
           echo "✅ Smoke test complete"
