@@ -93,6 +93,38 @@ else:
     fi
 }
 
+# Returns true (exit 0) if the response JSON has status_code 409.
+is_conflict() {
+    local json="$1"
+    local code
+    code=$(echo "$json" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status_code',''))" 2>/dev/null \
+        || echo "$json" | python -c "import sys,json; print(json.load(sys.stdin).get('status_code',''))" 2>/dev/null \
+        || echo "0")
+    [[ "$code" == "409" ]]
+}
+
+# Lists items at $1 and returns the ID of the item whose displayName equals $2.
+get_existing_id() {
+    local list_path="$1" display_name="$2"
+    local list_raw
+    list_raw=$(fab api -X get "$list_path" $VERBOSE 2>&1) || return 1
+    if command -v python3 >/dev/null 2>&1; then
+        echo "$list_raw" | python3 -c "
+import sys,json
+data=json.load(sys.stdin)
+items=data.get('text',data).get('value',[])
+match=[i for i in items if i.get('displayName')=='$display_name']
+print(match[0]['id'] if match else '')"
+    elif command -v python >/dev/null 2>&1; then
+        echo "$list_raw" | python -c "
+import sys,json
+data=json.load(sys.stdin)
+items=data.get('text',data).get('value',[])
+match=[i for i in items if i.get('displayName')=='$display_name']
+print(match[0]['id'] if match else '')"
+    fi
+}
+
 # -- Parse arguments --------------------------------------------------------
 
 while [[ $# -gt 0 ]]; do
@@ -159,12 +191,22 @@ EVENTHOUSE_RESPONSE=$(fab api -X post \
 EVENTHOUSE_ID=$(json_field "$EVENTHOUSE_RESPONSE" "id")
 
 if [[ -z "$EVENTHOUSE_ID" ]]; then
-    err "Could not extract Eventhouse ID from response:"
-    err "$EVENTHOUSE_RESPONSE"
-    exit 1
+    if is_conflict "$EVENTHOUSE_RESPONSE"; then
+        warn "Eventhouse '$EVENTHOUSE_NAME' already exists — looking up existing ID..."
+        EVENTHOUSE_ID=$(get_existing_id "workspaces/$WORKSPACE_ID/eventhouses" "$EVENTHOUSE_NAME")
+        if [[ -z "$EVENTHOUSE_ID" ]]; then
+            err "Could not find existing Eventhouse '$EVENTHOUSE_NAME' in workspace."
+            exit 1
+        fi
+        ok "Using existing Eventhouse: $EVENTHOUSE_ID"
+    else
+        err "Could not extract Eventhouse ID from response:"
+        err "$EVENTHOUSE_RESPONSE"
+        exit 1
+    fi
+else
+    ok "Eventhouse created: $EVENTHOUSE_ID"
 fi
-
-ok "Eventhouse created: $EVENTHOUSE_ID"
 
 # -- Create KQL Database ----------------------------------------------------
 
@@ -194,12 +236,22 @@ KQLDB_RESPONSE=$(fab api -X post \
 KQLDB_ID=$(json_field "$KQLDB_RESPONSE" "id")
 
 if [[ -z "$KQLDB_ID" ]]; then
-    err "Could not extract KQL Database ID from response:"
-    err "$KQLDB_RESPONSE"
-    exit 1
+    if is_conflict "$KQLDB_RESPONSE"; then
+        warn "KQL Database '$KQLDB_NAME' already exists — looking up existing ID..."
+        KQLDB_ID=$(get_existing_id "workspaces/$WORKSPACE_ID/kqlDatabases" "$KQLDB_NAME")
+        if [[ -z "$KQLDB_ID" ]]; then
+            err "Could not find existing KQL Database '$KQLDB_NAME' in workspace."
+            exit 1
+        fi
+        ok "Using existing KQL Database: $KQLDB_ID"
+    else
+        err "Could not extract KQL Database ID from response:"
+        err "$KQLDB_RESPONSE"
+        exit 1
+    fi
+else
+    ok "KQL Database created: $KQLDB_ID"
 fi
-
-ok "KQL Database created: $KQLDB_ID"
 
 # -- Create EventStreams ----------------------------------------------------
 
@@ -220,13 +272,24 @@ for ES_NAME in "iss-location-eventstream" "astronauts-eventstream"; do
     ES_ID=$(json_field "$ES_RESPONSE" "id")
 
     if [[ -z "$ES_ID" ]]; then
-        err "Could not extract EventStream ID from response:"
-        err "$ES_RESPONSE"
-        exit 1
+        if is_conflict "$ES_RESPONSE"; then
+            warn "EventStream '$ES_NAME' already exists — looking up existing ID..."
+            ES_ID=$(get_existing_id "workspaces/$WORKSPACE_ID/eventstreams" "$ES_NAME")
+            if [[ -z "$ES_ID" ]]; then
+                err "Could not find existing EventStream '$ES_NAME' in workspace."
+                exit 1
+            fi
+            ok "Using existing EventStream: $ES_ID ($ES_NAME)"
+        else
+            err "Could not extract EventStream ID from response:"
+            err "$ES_RESPONSE"
+            exit 1
+        fi
+    else
+        ok "EventStream created: $ES_ID ($ES_NAME)"
     fi
 
     EVENTSTREAM_IDS[$ES_NAME]="$ES_ID"
-    ok "EventStream created: $ES_ID ($ES_NAME)"
 done
 
 # -- Summary ----------------------------------------------------------------

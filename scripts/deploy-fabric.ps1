@@ -87,6 +87,39 @@ function Get-FabResourceId {
     return $null
 }
 
+# Returns $true if the parsed response object represents a 409 conflict.
+function Test-IsConflict {
+    param($Response)
+    $code = $null
+    if ($Response.PSObject.Properties.Name -contains 'status_code') { $code = [int]$Response.status_code }
+    return $code -eq 409
+}
+
+# Lists items at $ListPath and returns the ID of the one matching $DisplayName.
+function Get-ExistingFabId {
+    param(
+        [string]$ListPath,
+        [string]$DisplayName
+    )
+
+    $listArgs = @('api', '-X', 'get', $ListPath)
+    if ($CliVerbose) { $listArgs += '--verbose' }
+    $listRaw = Invoke-Fab -Arguments $listArgs -AllowFailure
+    $list = $listRaw | ConvertFrom-Json
+
+    # Items may be at top-level .value or inside .text.value
+    $items = $null
+    if ($list.PSObject.Properties.Name -contains 'text' -and $list.text.PSObject.Properties.Name -contains 'value') {
+        $items = $list.text.value
+    } elseif ($list.PSObject.Properties.Name -contains 'value') {
+        $items = $list.value
+    }
+
+    if (-not $items) { return $null }
+    $match = $items | Where-Object { $_.displayName -eq $DisplayName } | Select-Object -First 1
+    return if ($match) { [string]$match.id } else { $null }
+}
+
 Write-Info "Checking prerequisites..."
 
 if (-not (Get-Command fab -ErrorAction SilentlyContinue)) {
@@ -141,13 +174,24 @@ catch {
 
 $eventhouse = $eventhouseResponse | ConvertFrom-Json
 $eventhouseId = Get-FabResourceId -Response $eventhouse
-if (-not $eventhouseId) {
-    Write-Err 'Could not extract Eventhouse ID from response:'
-    Write-Err $eventhouseResponse
-    exit 1
-}
 
-Write-Ok "Eventhouse created: $eventhouseId"
+if (-not $eventhouseId) {
+    if (Test-IsConflict -Response $eventhouse) {
+        Write-WarnMsg "Eventhouse '$EventhouseName' already exists — looking up existing ID..."
+        $eventhouseId = Get-ExistingFabId -ListPath "workspaces/$WorkspaceId/eventhouses" -DisplayName $EventhouseName
+        if (-not $eventhouseId) {
+            Write-Err "Could not find existing Eventhouse '$EventhouseName' in workspace."
+            exit 1
+        }
+        Write-Ok "Using existing Eventhouse: $eventhouseId"
+    } else {
+        Write-Err 'Could not extract Eventhouse ID from response:'
+        Write-Err $eventhouseResponse
+        exit 1
+    }
+} else {
+    Write-Ok "Eventhouse created: $eventhouseId"
+}
 
 Write-Info "Creating KQL Database '$KqlDbName'..."
 $kqlDbPayload = (@{
@@ -170,13 +214,24 @@ catch {
 
 $kqlDb = $kqlDbResponse | ConvertFrom-Json
 $kqlDbId = Get-FabResourceId -Response $kqlDb
-if (-not $kqlDbId) {
-    Write-Err 'Could not extract KQL Database ID from response:'
-    Write-Err $kqlDbResponse
-    exit 1
-}
 
-Write-Ok "KQL Database created: $kqlDbId"
+if (-not $kqlDbId) {
+    if (Test-IsConflict -Response $kqlDb) {
+        Write-WarnMsg "KQL Database '$KqlDbName' already exists — looking up existing ID..."
+        $kqlDbId = Get-ExistingFabId -ListPath "workspaces/$WorkspaceId/kqlDatabases" -DisplayName $KqlDbName
+        if (-not $kqlDbId) {
+            Write-Err "Could not find existing KQL Database '$KqlDbName' in workspace."
+            exit 1
+        }
+        Write-Ok "Using existing KQL Database: $kqlDbId"
+    } else {
+        Write-Err 'Could not extract KQL Database ID from response:'
+        Write-Err $kqlDbResponse
+        exit 1
+    }
+} else {
+    Write-Ok "KQL Database created: $kqlDbId"
+}
 
 $eventStreamIds = [ordered]@{}
 foreach ($eventStreamName in @('iss-location-eventstream', 'astronauts-eventstream')) {
@@ -197,14 +252,26 @@ foreach ($eventStreamName in @('iss-location-eventstream', 'astronauts-eventstre
 
     $eventStream = $eventStreamResponse | ConvertFrom-Json
     $eventStreamId = Get-FabResourceId -Response $eventStream
+
     if (-not $eventStreamId) {
-        Write-Err 'Could not extract EventStream ID from response:'
-        Write-Err $eventStreamResponse
-        exit 1
+        if (Test-IsConflict -Response $eventStream) {
+            Write-WarnMsg "EventStream '$eventStreamName' already exists — looking up existing ID..."
+            $eventStreamId = Get-ExistingFabId -ListPath "workspaces/$WorkspaceId/eventstreams" -DisplayName $eventStreamName
+            if (-not $eventStreamId) {
+                Write-Err "Could not find existing EventStream '$eventStreamName' in workspace."
+                exit 1
+            }
+            Write-Ok "Using existing EventStream: $eventStreamId ($eventStreamName)"
+        } else {
+            Write-Err 'Could not extract EventStream ID from response:'
+            Write-Err $eventStreamResponse
+            exit 1
+        }
+    } else {
+        Write-Ok "EventStream created: $eventStreamId ($eventStreamName)"
     }
 
     $eventStreamIds[$eventStreamName] = $eventStreamId
-    Write-Ok "EventStream created: $eventStreamId ($eventStreamName)"
 }
 
 Write-Host ''
