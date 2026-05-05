@@ -117,7 +117,8 @@ function Get-ExistingFabId {
 
     if (-not $items) { return $null }
     $match = $items | Where-Object { $_.displayName -eq $DisplayName } | Select-Object -First 1
-    return if ($match) { [string]$match.id } else { $null }
+    if ($match) { return [string]$match.id }
+    return $null
 }
 
 Write-Info "Checking prerequisites..."
