@@ -68,6 +68,25 @@ function Invoke-FabApi {
     return Invoke-Fab -Arguments $arguments
 }
 
+function Get-FabResourceId {
+    param(
+        [Parameter(Mandatory = $true)]
+        $Response
+    )
+
+    # `fab api` wraps responses as { status_code, text: { ... } }.
+    # Older versions / direct REST responses return the resource directly.
+    if ($Response.PSObject.Properties.Name -contains 'text' -and $Response.text) {
+        if ($Response.text.PSObject.Properties.Name -contains 'id') {
+            return [string]$Response.text.id
+        }
+    }
+    if ($Response.PSObject.Properties.Name -contains 'id') {
+        return [string]$Response.id
+    }
+    return $null
+}
+
 Write-Info "Checking prerequisites..."
 
 if (-not (Get-Command fab -ErrorAction SilentlyContinue)) {
@@ -121,13 +140,13 @@ catch {
 }
 
 $eventhouse = $eventhouseResponse | ConvertFrom-Json
-if (-not $eventhouse.id) {
+$eventhouseId = Get-FabResourceId -Response $eventhouse
+if (-not $eventhouseId) {
     Write-Err 'Could not extract Eventhouse ID from response:'
     Write-Err $eventhouseResponse
     exit 1
 }
 
-$eventhouseId = [string]$eventhouse.id
 Write-Ok "Eventhouse created: $eventhouseId"
 
 Write-Info "Creating KQL Database '$KqlDbName'..."
@@ -150,13 +169,13 @@ catch {
 }
 
 $kqlDb = $kqlDbResponse | ConvertFrom-Json
-if (-not $kqlDb.id) {
+$kqlDbId = Get-FabResourceId -Response $kqlDb
+if (-not $kqlDbId) {
     Write-Err 'Could not extract KQL Database ID from response:'
     Write-Err $kqlDbResponse
     exit 1
 }
 
-$kqlDbId = [string]$kqlDb.id
 Write-Ok "KQL Database created: $kqlDbId"
 
 $eventStreamIds = [ordered]@{}
@@ -177,14 +196,15 @@ foreach ($eventStreamName in @('iss-location-eventstream', 'astronauts-eventstre
     }
 
     $eventStream = $eventStreamResponse | ConvertFrom-Json
-    if (-not $eventStream.id) {
+    $eventStreamId = Get-FabResourceId -Response $eventStream
+    if (-not $eventStreamId) {
         Write-Err 'Could not extract EventStream ID from response:'
         Write-Err $eventStreamResponse
         exit 1
     }
 
-    $eventStreamIds[$eventStreamName] = [string]$eventStream.id
-    Write-Ok "EventStream created: $($eventStream.id) ($eventStreamName)"
+    $eventStreamIds[$eventStreamName] = $eventStreamId
+    Write-Ok "EventStream created: $eventStreamId ($eventStreamName)"
 }
 
 Write-Host ''

@@ -70,14 +70,26 @@ EOF
 }
 
 # Extract JSON field value (uses Python when available, grep fallback otherwise).
+# Handles fab CLI's wrapped { status_code, text: { ... } } envelope by checking
+# the 'text' key first, then falling back to top-level.
 json_field() {
     local json="$1" field="$2"
     if command -v python3 >/dev/null 2>&1; then
-        echo "$json" | python3 -c "import sys,json; print(json.load(sys.stdin).get('$field',''))"
+        echo "$json" | python3 -c "import sys,json
+data=json.load(sys.stdin)
+if isinstance(data.get('text'), dict) and '$field' in data['text']:
+    print(data['text']['$field'])
+else:
+    print(data.get('$field',''))"
     elif command -v python >/dev/null 2>&1; then
-        echo "$json" | python -c "import sys,json; print(json.load(sys.stdin).get('$field',''))"
+        echo "$json" | python -c "import sys,json
+data=json.load(sys.stdin)
+if isinstance(data.get('text'), dict) and '$field' in data['text']:
+    print(data['text']['$field'])
+else:
+    print(data.get('$field',''))"
     else
-        echo "$json" | grep -oP "\"$field\"\s*:\s*\"?\K[^\",}]+"
+        echo "$json" | grep -oP "\"$field\"\s*:\s*\"?\K[^\",}]+" | head -n 1
     fi
 }
 
