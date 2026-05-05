@@ -60,7 +60,7 @@ function Invoke-FabApi {
         [string]$Payload
     )
 
-    $arguments = @('api', '-X', 'POST', $Path, '-i', $Payload)
+    $arguments = @('api', '-X', 'post', $Path, '-i', $Payload)
     if ($CliVerbose) {
         $arguments += '--verbose'
     }

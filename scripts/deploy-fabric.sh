@@ -135,7 +135,7 @@ echo ""
 
 info "Creating Eventhouse '$EVENTHOUSE_NAME'..."
 
-EVENTHOUSE_RESPONSE=$(fab api -X POST \
+EVENTHOUSE_RESPONSE=$(fab api -X post \
     "workspaces/$WORKSPACE_ID/eventhouses" \
     -i "{\"displayName\": \"$EVENTHOUSE_NAME\", \"description\": \"Eventhouse for ISS Demo - hosts the KQL database for real-time ISS tracking.\"}" \
     $VERBOSE 2>&1) || {
@@ -170,7 +170,7 @@ KQLDB_PAYLOAD=$(cat <<JSON
 JSON
 )
 
-KQLDB_RESPONSE=$(fab api -X POST \
+KQLDB_RESPONSE=$(fab api -X post \
     "workspaces/$WORKSPACE_ID/kqlDatabases" \
     -i "$KQLDB_PAYLOAD" \
     $VERBOSE 2>&1) || {
@@ -196,7 +196,7 @@ declare -A EVENTSTREAM_IDS
 for ES_NAME in "iss-location-eventstream" "astronauts-eventstream"; do
     info "Creating EventStream '$ES_NAME'..."
 
-    ES_RESPONSE=$(fab api -X POST \
+    ES_RESPONSE=$(fab api -X post \
         "workspaces/$WORKSPACE_ID/eventstreams" \
         -i "{\"displayName\": \"$ES_NAME\", \"description\": \"EventStream for ISS Demo - $ES_NAME.\"}" \
         $VERBOSE 2>&1) || {
