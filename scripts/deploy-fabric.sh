@@ -52,6 +52,43 @@ ok()    { echo -e "${GREEN}[OK]${NC}    $*"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 err()   { echo -e "${RED}[ERROR]${NC} $*" >&2; }
 
+# Runs a single KQL management command against a Fabric KQL database.
+# Usage: run_kusto_mgmt <query_uri> <database> <token> <command>
+# Returns 0 on success, 1 on failure.
+run_kusto_mgmt() {
+    local query_uri="$1" database="$2" token="$3" command="$4"
+    local body http_status response
+
+    # Build JSON body using Python (already a dependency for json_field)
+    body=$(python3 -c "
+import json, sys
+print(json.dumps({'csl': sys.argv[1], 'db': sys.argv[2]}))" "$command" "$database" 2>/dev/null \
+        || python -c "
+import json, sys
+print(json.dumps({'csl': sys.argv[1], 'db': sys.argv[2]}))" "$command" "$database")
+
+    if [[ -z "$body" ]]; then
+        warn "  Could not build request body (Python not available)."
+        return 1
+    fi
+
+    if command -v curl >/dev/null 2>&1; then
+        http_status=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$query_uri/v1/rest/mgmt" \
+            -H "Authorization: Bearer $token" \
+            -H "Content-Type: application/json" \
+            -d "$body")
+        if [[ "$http_status" =~ ^2 ]]; then
+            return 0
+        else
+            warn "  HTTP $http_status from Kusto management endpoint."
+            return 1
+        fi
+    else
+        warn "  curl not found — cannot run management command."
+        return 1
+    fi
+}
+
 usage() {
     cat <<EOF
 Usage: $(basename "$0") --workspace-id <WORKSPACE_ID> [OPTIONS]
@@ -323,6 +360,58 @@ else
     ok "Fabric Ingestion URI detected: $FABRIC_QUERY_URI"
 fi
 
+# -- Apply KQL Schema -------------------------------------------------------
+
+SCHEMA_APPLIED=false
+
+if [[ -z "$FABRIC_QUERY_URI" ]]; then
+    warn "Skipping automated schema setup — Query URI not available."
+    warn "Run kql/schema.kql manually in the Fabric KQL Database editor."
+elif ! command -v az >/dev/null 2>&1; then
+    warn "Azure CLI ('az') not found — skipping automated schema setup."
+    warn "Run kql/schema.kql manually in the Fabric KQL Database editor."
+else
+    info "Applying KQL schema (tables, mappings, streaming ingestion policy)..."
+
+    KUSTO_TOKEN=$(az account get-access-token --resource https://kusto.windows.net --query accessToken -o tsv 2>/dev/null)
+
+    if [[ -z "$KUSTO_TOKEN" ]]; then
+        warn "Could not get Kusto access token — are you logged in with 'az login'?"
+        warn "Run kql/schema.kql manually in the Fabric KQL Database editor."
+    else
+        ISS_MAPPING='[{"column":"Timestamp","path":"$.Timestamp","datatype":"datetime"},{"column":"CollectedAtUtc","path":"$.CollectedAtUtc","datatype":"datetime"},{"column":"Latitude","path":"$.Latitude","datatype":"real"},{"column":"Longitude","path":"$.Longitude","datatype":"real"}]'
+        ASTRO_MAPPING='[{"column":"CollectedAtUtc","path":"$.CollectedAtUtc","datatype":"datetime"},{"column":"Number","path":"$.Number","datatype":"int"},{"column":"People","path":"$.People","datatype":"dynamic"}]'
+
+        # Brief pause to ensure the KQL database management endpoint is fully ready
+        sleep 5
+
+        ALL_OK=true
+        while IFS= read -r cmd; do
+            label="${cmd:0:70}…"
+            info "  $label"
+            if run_kusto_mgmt "$FABRIC_QUERY_URI" "$KQLDB_NAME" "$KUSTO_TOKEN" "$cmd"; then
+                ok "  Done"
+            else
+                ALL_OK=false
+            fi
+        done <<COMMANDS
+.alter database ['$KQLDB_NAME'] policy streamingingestion enable
+.create-merge table ISS_Loc (Timestamp: datetime, CollectedAtUtc: datetime, Latitude: real, Longitude: real)
+.create-or-alter table ISS_Loc ingestion json mapping 'ISS_Loc_JSON_Mapping' '$ISS_MAPPING'
+.create-merge table Astronauts (CollectedAtUtc: datetime, Number: int, People: dynamic)
+.create-or-alter table Astronauts ingestion json mapping 'Astronauts_JSON_Mapping' '$ASTRO_MAPPING'
+COMMANDS
+
+        if [[ "$ALL_OK" == true ]]; then
+            ok "KQL schema applied: ISS_Loc, Astronauts tables + streaming ingestion policy"
+            SCHEMA_APPLIED=true
+        else
+            warn "Some schema commands failed — see warnings above."
+            warn "Re-run this script or apply kql/schema.kql manually to finish setup."
+        fi
+    fi
+fi
+
 # -- Summary ----------------------------------------------------------------
 
 echo ""
@@ -355,14 +444,13 @@ fi
 echo ""
 echo "  NEXT STEPS:"
 echo "  ------------------------------------------------------"
-echo "  1. Run kql/schema.kql in the Fabric KQL Database editor to create tables"
+echo "  1. Set FabricIngestionUri on your Container App (see above)"
 echo ""
-echo "  2. Set FabricIngestionUri on your Container App (see above)"
-echo ""
-echo "  3. Verify data is flowing:"
+echo "  2. Verify data is flowing (run in Fabric KQL Database editor):"
 echo "       ISS_Loc | count"
 echo "       Astronauts | count"
 echo ""
+echo "  Note: If schema setup was skipped, run kql/schema.kql manually first."
 echo "  For detailed instructions, see: docs/fabric-setup.md"
 echo "======================================================================"
 echo ""
