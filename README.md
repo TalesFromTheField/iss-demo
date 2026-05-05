@@ -18,22 +18,6 @@
 
 ---
 
-## Deploy To Azure
-
-<p align="center">
-  <a href="https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FTalesFromTheField%2Fiss-demo%2Fmain%2Finfra%2Fazuredeploy.json">
-    <img src="https://aka.ms/deploytoazurebutton" alt="Deploy to Azure">
-  </a>
-</p>
-
-The button provisions Azure infrastructure from `infra/main.bicep` and deploys the Container App with the public image
-published from repository releases.
-
-After the template deployment finishes, complete Fabric + Power BI setup using the
-[Deployment Guide](docs/deployment-guide.md).
-
----
-
 ## 📺 Video Walkthrough
 
 Check out the full walkthrough on YouTube! 🎬
@@ -86,7 +70,7 @@ into **Event Hubs**, and streams them through **Microsoft Fabric** into a **KQL 
 
 Ready to deploy? Here's how to get rolling:
 
-1. **☁️ Deploy Azure Infrastructure** — Follow the [Deployment Guide](docs/deployment-guide.md) to use the Deploy to Azure button and provision the running Azure stack without local build steps.
+1. **☁️ Deploy Azure Infrastructure** — Follow the [Deployment Guide](docs/deployment-guide.md) to set up OIDC auth and trigger the GitHub Actions CD workflow to provision the full Azure stack.
 2. **🧵 Set Up Microsoft Fabric** — Follow the [Fabric Setup Guide](docs/fabric-setup.md) to configure EventStreams, KQL Database, and Power BI.
 3. **🎉 Watch the ISS fly!** — Open your Power BI dashboard and see the station orbit in real-time.
 
@@ -101,7 +85,7 @@ Ready to deploy? Here's how to get rolling:
 
 | Component | Status | Details |
 |---|---|---|
-| Azure infrastructure | ✅ Automated | Provisioned by the Deploy to Azure button |
+| Azure infrastructure | ✅ Automated | Provisioned via GitHub Actions CD workflow (Bicep) |
 | Scheduler image | ✅ Automated | Pulled from the public GHCR image published from releases |
 | Event Hubs | ✅ Automated | Provisioned via Bicep modules |
 | Monitoring & Alerts | ✅ Automated | Application Insights + Log Analytics via Bicep |
