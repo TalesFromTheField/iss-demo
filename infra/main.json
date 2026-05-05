@@ -1,0 +1,910 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.42.1.51946",
+      "templateHash": "8762055839377041070"
+    }
+  },
+  "parameters": {
+    "environmentName": {
+      "type": "string",
+      "metadata": {
+        "description": "Environment name (e.g., dev, staging, prod)."
+      }
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]",
+      "metadata": {
+        "description": "Azure region for all resources."
+      }
+    },
+    "containerImageUri": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Optional container image URI override. Leave blank to deploy ghcr.io/talesfromthefield/iss-demo:latest."
+      }
+    },
+    "fabricIngestionUri": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Eventhouse Query URI from the Fabric portal (e.g. https://trd-xxxx.z6.kusto.data.microsoft.com). Obtained after running scripts/deploy-fabric.ps1."
+      }
+    },
+    "fabricDatabaseName": {
+      "type": "string",
+      "defaultValue": "iss-demo-kqldb",
+      "metadata": {
+        "description": "Fabric KQL Database name to ingest data into."
+      }
+    },
+    "fabricTenantId": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "  Entra tenant ID for Fabric service principal authentication.\nWhen provided together with fabricClientId, fabricClientSecret, and\nfabricWorkspaceId, the deployment automatically provisions all Fabric\nresources and configures the Container App — no manual steps required.\nLeave blank to configure Fabric manually after deployment.\n"
+      }
+    },
+    "fabricClientId": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Application (client) ID of the service principal granted Member access to the Fabric workspace."
+      }
+    },
+    "fabricClientSecret": {
+      "type": "securestring",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Client secret of the service principal. This value is never logged or stored in plain text."
+      }
+    },
+    "fabricWorkspaceId": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Fabric workspace GUID (visible in the Fabric portal URL: app.fabric.microsoft.com/groups/<workspace-id>)."
+      }
+    }
+  },
+  "variables": {
+    "normalizedEnvironmentName": "[toLower(replace(replace(replace(parameters('environmentName'), ' ', '-'), '_', '-'), '.', '-'))]",
+    "bootstrapEnabled": "[and(and(and(not(empty(parameters('fabricTenantId'))), not(empty(parameters('fabricClientId')))), not(empty(parameters('fabricClientSecret')))), not(empty(parameters('fabricWorkspaceId'))))]",
+    "effectiveImageUri": "[if(not(empty(parameters('containerImageUri'))), parameters('containerImageUri'), 'ghcr.io/talesfromthefield/iss-demo:latest')]"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "monitoring",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "environmentName": {
+            "value": "[variables('normalizedEnvironmentName')]"
+          },
+          "location": {
+            "value": "[parameters('location')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.42.1.51946",
+              "templateHash": "3139035333357774440"
+            }
+          },
+          "parameters": {
+            "environmentName": {
+              "type": "string",
+              "metadata": {
+                "description": "Environment name used for resource naming (e.g. dev, staging, prod)."
+              }
+            },
+            "location": {
+              "type": "string",
+              "metadata": {
+                "description": "Azure region for all resources in this module."
+              }
+            },
+            "functionAppName": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Name of the Function App (informational; for backward compatibility)."
+              }
+            },
+            "functionAppResourceId": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Resource ID of the Function App (for backward compatibility; used in alert display names)."
+              }
+            },
+            "containerAppName": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Name of the Container App (informational; used in alert display names)."
+              }
+            },
+            "containerAppResourceId": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Resource ID of the Container App to scope metric alerts against. When empty, alert rules are not deployed."
+              }
+            }
+          },
+          "variables": {
+            "normalizedEnvironmentName": "[toLower(replace(replace(replace(parameters('environmentName'), ' ', '-'), '_', '-'), '.', '-'))]",
+            "logAnalyticsName": "[format('law-iss-{0}', variables('normalizedEnvironmentName'))]",
+            "appInsightsName": "[format('appi-iss-{0}', variables('normalizedEnvironmentName'))]",
+            "effectiveAppResourceId": "[if(not(empty(parameters('containerAppResourceId'))), parameters('containerAppResourceId'), parameters('functionAppResourceId'))]",
+            "effectiveAppName": "[if(not(empty(parameters('containerAppName'))), parameters('containerAppName'), parameters('functionAppName'))]",
+            "alertsEnabled": "[not(empty(variables('effectiveAppResourceId')))]"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.OperationalInsights/workspaces",
+              "apiVersion": "2023-09-01",
+              "name": "[variables('logAnalyticsName')]",
+              "location": "[parameters('location')]",
+              "properties": {
+                "sku": {
+                  "name": "PerGB2018"
+                },
+                "retentionInDays": 30,
+                "features": {
+                  "enableLogAccessUsingOnlyResourcePermissions": true
+                },
+                "publicNetworkAccessForIngestion": "Enabled",
+                "publicNetworkAccessForQuery": "Enabled"
+              },
+              "metadata": {
+                "description": "Log Analytics Workspace that backs Application Insights."
+              }
+            },
+            {
+              "type": "Microsoft.Insights/components",
+              "apiVersion": "2020-02-02",
+              "name": "[variables('appInsightsName')]",
+              "location": "[parameters('location')]",
+              "kind": "web",
+              "properties": {
+                "Application_Type": "web",
+                "WorkspaceResourceId": "[resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsName'))]",
+                "RetentionInDays": 30,
+                "IngestionMode": "LogAnalytics",
+                "publicNetworkAccessForIngestion": "Enabled",
+                "publicNetworkAccessForQuery": "Enabled"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsName'))]"
+              ],
+              "metadata": {
+                "description": "Application Insights instance connected to the Log Analytics Workspace."
+              }
+            },
+            {
+              "condition": "[and(variables('alertsEnabled'), not(empty(parameters('functionAppResourceId'))))]",
+              "type": "Microsoft.Insights/metricAlerts",
+              "apiVersion": "2018-03-01",
+              "name": "[format('alert-func-failures-{0}', variables('normalizedEnvironmentName'))]",
+              "location": "global",
+              "properties": {
+                "description": "[format('Function execution failures exceeded threshold (>5 in 5 min) for {0}.', variables('effectiveAppName'))]",
+                "severity": 2,
+                "enabled": true,
+                "evaluationFrequency": "PT1M",
+                "windowSize": "PT5M",
+                "scopes": [
+                  "[variables('effectiveAppResourceId')]"
+                ],
+                "criteria": {
+                  "odata.type": "Microsoft.Azure.Monitor.SingleResourceMultipleMetricCriteria",
+                  "allOf": [
+                    {
+                      "name": "FunctionExecutionFailures",
+                      "metricName": "FunctionExecutionCount",
+                      "metricNamespace": "Microsoft.Web/sites",
+                      "operator": "GreaterThan",
+                      "threshold": 5,
+                      "timeAggregation": "Total",
+                      "dimensions": [
+                        {
+                          "name": "FunctionExecutionStatus",
+                          "operator": "Include",
+                          "values": [
+                            "Failed"
+                          ]
+                        }
+                      ],
+                      "criterionType": "StaticThresholdCriterion"
+                    }
+                  ]
+                },
+                "autoMitigate": true,
+                "targetResourceType": "Microsoft.Web/sites",
+                "targetResourceRegion": "[parameters('location')]"
+              },
+              "metadata": {
+                "description": "Fires when Function App execution failures exceed 5 within a 5-minute window."
+              }
+            },
+            {
+              "condition": "[and(variables('alertsEnabled'), not(empty(parameters('functionAppResourceId'))))]",
+              "type": "Microsoft.Insights/metricAlerts",
+              "apiVersion": "2018-03-01",
+              "name": "[format('alert-func-stopped-{0}', variables('normalizedEnvironmentName'))]",
+              "location": "global",
+              "properties": {
+                "description": "[format('No successful function executions detected in the last 10 minutes for {0}. The Function App may have stopped.', variables('effectiveAppName'))]",
+                "severity": 1,
+                "enabled": true,
+                "evaluationFrequency": "PT5M",
+                "windowSize": "PT10M",
+                "scopes": [
+                  "[variables('effectiveAppResourceId')]"
+                ],
+                "criteria": {
+                  "odata.type": "Microsoft.Azure.Monitor.SingleResourceMultipleMetricCriteria",
+                  "allOf": [
+                    {
+                      "name": "ZeroSuccessfulExecutions",
+                      "metricName": "FunctionExecutionCount",
+                      "metricNamespace": "Microsoft.Web/sites",
+                      "operator": "LessThanOrEqual",
+                      "threshold": 0,
+                      "timeAggregation": "Total",
+                      "dimensions": [
+                        {
+                          "name": "FunctionExecutionStatus",
+                          "operator": "Include",
+                          "values": [
+                            "Completed"
+                          ]
+                        }
+                      ],
+                      "criterionType": "StaticThresholdCriterion"
+                    }
+                  ]
+                },
+                "autoMitigate": true,
+                "targetResourceType": "Microsoft.Web/sites",
+                "targetResourceRegion": "[parameters('location')]"
+              },
+              "metadata": {
+                "description": "Fires when there are zero successful Function executions over a 10-minute window, indicating the Function App may have stopped."
+              }
+            }
+          ],
+          "outputs": {
+            "appInsightsConnectionString": {
+              "type": "string",
+              "metadata": {
+                "description": "Application Insights connection string for the Function App configuration."
+              },
+              "value": "[reference(resourceId('Microsoft.Insights/components', variables('appInsightsName')), '2020-02-02').ConnectionString]"
+            },
+            "appInsightsInstrumentationKey": {
+              "type": "string",
+              "metadata": {
+                "description": "Application Insights instrumentation key (legacy; prefer connection string)."
+              },
+              "value": "[reference(resourceId('Microsoft.Insights/components', variables('appInsightsName')), '2020-02-02').InstrumentationKey]"
+            },
+            "logAnalyticsWorkspaceId": {
+              "type": "string",
+              "metadata": {
+                "description": "Resource ID of the Log Analytics Workspace."
+              },
+              "value": "[resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsName'))]"
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "container-registry",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "environmentName": {
+            "value": "[variables('normalizedEnvironmentName')]"
+          },
+          "location": {
+            "value": "[parameters('location')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.42.1.51946",
+              "templateHash": "4764341005766993572"
+            }
+          },
+          "parameters": {
+            "environmentName": {
+              "type": "string",
+              "metadata": {
+                "description": "Environment name used for resource naming (e.g., dev, prod)."
+              }
+            },
+            "location": {
+              "type": "string",
+              "metadata": {
+                "description": "Azure region for the container registry."
+              }
+            }
+          },
+          "variables": {
+            "envToken": "[toLower(replace(replace(replace(parameters('environmentName'), '-', ''), '_', ''), '.', ''))]",
+            "uniqueSuffix": "[take(uniqueString(subscription().id, resourceGroup().id, parameters('environmentName')), 6)]",
+            "acrName": "[take(format('acriss{0}{1}', variables('envToken'), variables('uniqueSuffix')), 50)]"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.ContainerRegistry/registries",
+              "apiVersion": "2023-07-01",
+              "name": "[variables('acrName')]",
+              "location": "[parameters('location')]",
+              "sku": {
+                "name": "Basic"
+              },
+              "properties": {
+                "adminUserEnabled": false,
+                "publicNetworkAccess": "Enabled",
+                "networkRuleBypassOptions": "AzureServices"
+              },
+              "metadata": {
+                "description": "Azure Container Registry for ISS Demo container images."
+              }
+            }
+          ],
+          "outputs": {
+            "registryName": {
+              "type": "string",
+              "metadata": {
+                "description": "The name of the container registry."
+              },
+              "value": "[variables('acrName')]"
+            },
+            "loginServer": {
+              "type": "string",
+              "metadata": {
+                "description": "The login server URL of the container registry."
+              },
+              "value": "[reference(resourceId('Microsoft.ContainerRegistry/registries', variables('acrName')), '2023-07-01').loginServer]"
+            },
+            "registryResourceId": {
+              "type": "string",
+              "metadata": {
+                "description": "The resource ID of the container registry."
+              },
+              "value": "[resourceId('Microsoft.ContainerRegistry/registries', variables('acrName'))]"
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "container-app",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "environmentName": {
+            "value": "[variables('normalizedEnvironmentName')]"
+          },
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "appInsightsConnectionString": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'monitoring'), '2025-04-01').outputs.appInsightsConnectionString.value]"
+          },
+          "fabricIngestionUri": {
+            "value": "[parameters('fabricIngestionUri')]"
+          },
+          "fabricDatabaseName": {
+            "value": "[parameters('fabricDatabaseName')]"
+          },
+          "containerImageUri": {
+            "value": "[variables('effectiveImageUri')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.42.1.51946",
+              "templateHash": "8050241481366750995"
+            }
+          },
+          "parameters": {
+            "environmentName": {
+              "type": "string",
+              "metadata": {
+                "description": "Environment name used for resource naming (e.g., dev, prod)."
+              }
+            },
+            "location": {
+              "type": "string",
+              "metadata": {
+                "description": "Azure region for all resources."
+              }
+            },
+            "appInsightsConnectionString": {
+              "type": "string",
+              "metadata": {
+                "description": "Application Insights connection string for telemetry."
+              }
+            },
+            "fabricIngestionUri": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Eventhouse Query URI from the Fabric portal. Set after running deploy-fabric scripts."
+              }
+            },
+            "fabricDatabaseName": {
+              "type": "string",
+              "defaultValue": "iss-demo-kqldb",
+              "metadata": {
+                "description": "Fabric KQL Database name to ingest data into."
+              }
+            },
+            "fabricIssTable": {
+              "type": "string",
+              "defaultValue": "ISS_Loc",
+              "metadata": {
+                "description": "KQL table name for ISS location records."
+              }
+            },
+            "fabricAstronautsTable": {
+              "type": "string",
+              "defaultValue": "Astronauts",
+              "metadata": {
+                "description": "KQL table name for astronaut records."
+              }
+            },
+            "containerImageUri": {
+              "type": "string",
+              "metadata": {
+                "description": "Container image URI (e.g., ghcr.io/talesfromthefield/iss-demo:latest)."
+              }
+            }
+          },
+          "variables": {
+            "normalizedEnvironmentName": "[toLower(replace(replace(replace(parameters('environmentName'), ' ', '-'), '_', '-'), '.', '-'))]",
+            "containerAppEnvName": "[format('cae-iss-{0}', variables('normalizedEnvironmentName'))]",
+            "containerAppName": "[format('ca-iss-{0}', variables('normalizedEnvironmentName'))]",
+            "logAnalyticsWorkspaceName": "[format('law-iss-{0}', variables('normalizedEnvironmentName'))]"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.App/managedEnvironments",
+              "apiVersion": "2024-03-01",
+              "name": "[variables('containerAppEnvName')]",
+              "location": "[parameters('location')]",
+              "properties": {
+                "appLogsConfiguration": {
+                  "destination": "log-analytics",
+                  "logAnalyticsConfiguration": {
+                    "customerId": "[reference(resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsWorkspaceName')), '2023-09-01').customerId]",
+                    "sharedKey": "[listKeys(resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsWorkspaceName')), '2023-09-01').primarySharedKey]"
+                  }
+                }
+              },
+              "metadata": {
+                "description": "Container App Environment for ISS Demo."
+              }
+            },
+            {
+              "type": "Microsoft.App/containerApps",
+              "apiVersion": "2024-03-01",
+              "name": "[variables('containerAppName')]",
+              "location": "[parameters('location')]",
+              "identity": {
+                "type": "SystemAssigned"
+              },
+              "properties": {
+                "environmentId": "[resourceId('Microsoft.App/managedEnvironments', variables('containerAppEnvName'))]",
+                "configuration": {},
+                "template": {
+                  "containers": [
+                    {
+                      "image": "[parameters('containerImageUri')]",
+                      "name": "iss-demo-scheduler",
+                      "env": [
+                        {
+                          "name": "FabricIngestionUri",
+                          "value": "[parameters('fabricIngestionUri')]"
+                        },
+                        {
+                          "name": "FabricDatabaseName",
+                          "value": "[parameters('fabricDatabaseName')]"
+                        },
+                        {
+                          "name": "FabricIssTable",
+                          "value": "[parameters('fabricIssTable')]"
+                        },
+                        {
+                          "name": "FabricAstronautsTable",
+                          "value": "[parameters('fabricAstronautsTable')]"
+                        },
+                        {
+                          "name": "APPLICATIONINSIGHTS_CONNECTION_STRING",
+                          "value": "[parameters('appInsightsConnectionString')]"
+                        }
+                      ],
+                      "resources": {
+                        "cpu": "[json('0.5')]",
+                        "memory": "1Gi"
+                      }
+                    }
+                  ],
+                  "scale": {
+                    "minReplicas": 1,
+                    "maxReplicas": 1
+                  }
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.App/managedEnvironments', variables('containerAppEnvName'))]"
+              ],
+              "metadata": {
+                "description": "Container App running the ISS Demo scheduler."
+              }
+            }
+          ],
+          "outputs": {
+            "containerAppName": {
+              "type": "string",
+              "metadata": {
+                "description": "The name of the Container App."
+              },
+              "value": "[variables('containerAppName')]"
+            },
+            "containerAppPrincipalId": {
+              "type": "string",
+              "metadata": {
+                "description": "The principal ID of the Container App system-assigned Managed Identity."
+              },
+              "value": "[reference(resourceId('Microsoft.App/containerApps', variables('containerAppName')), '2024-03-01', 'full').identity.principalId]"
+            },
+            "containerAppResourceId": {
+              "type": "string",
+              "metadata": {
+                "description": "The resource ID of the Container App."
+              },
+              "value": "[resourceId('Microsoft.App/containerApps', variables('containerAppName'))]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Resources/deployments', 'monitoring')]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "role-assignments",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "principalId": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'container-app'), '2025-04-01').outputs.containerAppPrincipalId.value]"
+          },
+          "acrResourceId": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'container-registry'), '2025-04-01').outputs.registryResourceId.value]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.42.1.51946",
+              "templateHash": "498760540595536850"
+            }
+          },
+          "parameters": {
+            "principalId": {
+              "type": "string",
+              "metadata": {
+                "description": "The principal ID of the Container App system-assigned Managed Identity."
+              }
+            },
+            "acrResourceId": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Full resource ID of the Azure Container Registry (optional)."
+              }
+            }
+          },
+          "variables": {
+            "acrPullRoleId": "7f951dda-4ed3-4680-a7ca-43fe172d538d"
+          },
+          "resources": [
+            {
+              "condition": "[not(empty(parameters('acrResourceId')))]",
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.ContainerRegistry/registries', last(split(parameters('acrResourceId'), '/')))]",
+              "name": "[guid(parameters('acrResourceId'), parameters('principalId'), variables('acrPullRoleId'))]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('acrPullRoleId'))]",
+                "principalId": "[parameters('principalId')]",
+                "principalType": "ServicePrincipal"
+              },
+              "metadata": {
+                "description": "Assigns the AcrPull role to the Container App managed identity, scoped to the Container Registry."
+              }
+            }
+          ],
+          "outputs": {
+            "acrRoleAssignmentId": {
+              "type": "string",
+              "metadata": {
+                "description": "The resource ID of the ACR pull role assignment (if ACR provided)."
+              },
+              "value": "[if(not(empty(parameters('acrResourceId'))), extensionResourceId(resourceId('Microsoft.ContainerRegistry/registries', last(split(parameters('acrResourceId'), '/'))), 'Microsoft.Authorization/roleAssignments', guid(parameters('acrResourceId'), parameters('principalId'), variables('acrPullRoleId'))), '')]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Resources/deployments', 'container-app')]",
+        "[resourceId('Microsoft.Resources/deployments', 'container-registry')]"
+      ]
+    },
+    {
+      "condition": "[variables('bootstrapEnabled')]",
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "bootstrap",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "containerAppName": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'container-app'), '2025-04-01').outputs.containerAppName.value]"
+          },
+          "fabricWorkspaceId": {
+            "value": "[parameters('fabricWorkspaceId')]"
+          },
+          "fabricTenantId": {
+            "value": "[parameters('fabricTenantId')]"
+          },
+          "fabricClientId": {
+            "value": "[parameters('fabricClientId')]"
+          },
+          "fabricClientSecret": {
+            "value": "[parameters('fabricClientSecret')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.42.1.51946",
+              "templateHash": "11384501930549014325"
+            }
+          },
+          "parameters": {
+            "location": {
+              "type": "string",
+              "metadata": {
+                "description": "Azure region for the deploymentScript and its managed identity."
+              }
+            },
+            "containerAppName": {
+              "type": "string",
+              "metadata": {
+                "description": "Name of the Container App to update with FabricIngestionUri after setup."
+              }
+            },
+            "resourceGroupName": {
+              "type": "string",
+              "defaultValue": "[resourceGroup().name]",
+              "metadata": {
+                "description": "Name of the Container App resource group."
+              }
+            },
+            "fabricWorkspaceId": {
+              "type": "string",
+              "metadata": {
+                "description": "Fabric workspace GUID (from the Fabric portal URL)."
+              }
+            },
+            "fabricTenantId": {
+              "type": "string",
+              "metadata": {
+                "description": "Entra tenant ID for Fabric service principal authentication."
+              }
+            },
+            "fabricClientId": {
+              "type": "string",
+              "metadata": {
+                "description": "Application (client) ID of the service principal granted access to the Fabric workspace."
+              }
+            },
+            "fabricClientSecret": {
+              "type": "securestring",
+              "metadata": {
+                "description": "Client secret of the service principal. Store this value in a Key Vault in production."
+              }
+            },
+            "deployFabricScriptUrl": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "  Optional URL override for deploy-fabric.sh. Leave blank to use the script\nfrom the main branch of the TalesFromTheField/iss-demo repository.\n"
+              }
+            }
+          },
+          "variables": {
+            "$fxv#0": "#!/bin/bash\r\n# =============================================================================\r\n# ISS Demo — Fabric Bootstrap Script\r\n#\r\n# Runs inside an Azure deploymentScript (managed ACI) as part of 'azd up' or\r\n# the Deploy to Azure flow. Performs all Fabric setup automatically:\r\n#\r\n#   1. Installs ms-fabric-cli\r\n#   2. Authenticates with Fabric using a service principal\r\n#   3. Creates Eventhouse, KQL Database, and tables (idempotent)\r\n#   4. Captures the FabricIngestionUri from the deployment output\r\n#   5. Updates the Container App with FabricIngestionUri so it can start\r\n#      streaming data to Fabric immediately\r\n#\r\n# Environment variables (injected by Bicep deploymentScript):\r\n#   FABRIC_CLIENT_ID       — Service principal application (client) ID\r\n#   FABRIC_CLIENT_SECRET   — Service principal client secret (secure)\r\n#   FABRIC_TENANT_ID       — Azure / Entra tenant ID\r\n#   FABRIC_WORKSPACE_ID    — Fabric workspace GUID\r\n#   CONTAINER_APP_NAME     — Name of the Azure Container App to update\r\n#   AZURE_RESOURCE_GROUP   — Resource group containing the Container App\r\n#   DEPLOY_FABRIC_SCRIPT   — URL of deploy-fabric.sh to download (optional override)\r\n#\r\n# Output (written to $AZ_SCRIPTS_OUTPUT_PATH):\r\n#   { \"fabricIngestionUri\": \"https://trd-xxx.region.kusto.data.microsoft.com\" }\r\n# =============================================================================\r\n\r\nset -euo pipefail\r\n\r\nRED='\\033[0;31m'; GREEN='\\033[0;32m'; YELLOW='\\033[1;33m'; CYAN='\\033[0;36m'; NC='\\033[0m'\r\ninfo()  { echo -e \"${CYAN}[INFO]${NC}  $*\"; }\r\nok()    { echo -e \"${GREEN}[OK]${NC}    $*\"; }\r\nwarn()  { echo -e \"${YELLOW}[WARN]${NC}  $*\"; }\r\nerr()   { echo -e \"${RED}[ERROR]${NC} $*\" >&2; }\r\n\r\n# -- Validate required env vars -----------------------------------------------\r\n\r\nfor var in FABRIC_CLIENT_ID FABRIC_CLIENT_SECRET FABRIC_TENANT_ID FABRIC_WORKSPACE_ID \\\r\n           CONTAINER_APP_NAME AZURE_RESOURCE_GROUP; do\r\n    if [[ -z \"${!var:-}\" ]]; then\r\n        err \"Missing required environment variable: $var\"\r\n        exit 1\r\n    fi\r\ndone\r\n\r\n# -- Install ms-fabric-cli ----------------------------------------------------\r\n\r\ninfo \"Installing ms-fabric-cli...\"\r\npip install -q --disable-pip-version-check ms-fabric-cli\r\nok \"ms-fabric-cli installed: $(fab --version 2>/dev/null || echo 'unknown')\"\r\n\r\n# -- Authenticate with Fabric -------------------------------------------------\r\n\r\ninfo \"Authenticating with Fabric (service principal)...\"\r\nfab auth login \\\r\n    -u \"$FABRIC_CLIENT_ID\" \\\r\n    -p \"$FABRIC_CLIENT_SECRET\" \\\r\n    --tenant \"$FABRIC_TENANT_ID\"\r\nok \"Fabric authenticated\"\r\n\r\n# -- Download and run deploy-fabric.sh ----------------------------------------\r\n\r\nSCRIPT_URL=\"${DEPLOY_FABRIC_SCRIPT:-https://raw.githubusercontent.com/TalesFromTheField/iss-demo/main/scripts/deploy-fabric.sh}\"\r\ninfo \"Downloading deploy-fabric.sh from: $SCRIPT_URL\"\r\ncurl -fsSL \"$SCRIPT_URL\" -o /tmp/deploy-fabric.sh\r\nchmod +x /tmp/deploy-fabric.sh\r\nok \"Script downloaded\"\r\n\r\ninfo \"Running Fabric deployment for workspace: $FABRIC_WORKSPACE_ID\"\r\nDEPLOY_OUTPUT=$(/tmp/deploy-fabric.sh --workspace-id \"$FABRIC_WORKSPACE_ID\" 2>&1) || {\r\n    err \"deploy-fabric.sh failed. Output:\"\r\n    echo \"$DEPLOY_OUTPUT\"\r\n    exit 1\r\n}\r\n\r\necho \"$DEPLOY_OUTPUT\"\r\n\r\n# -- Extract FabricIngestionUri -----------------------------------------------\r\n\r\nFABRIC_URI=$(echo \"$DEPLOY_OUTPUT\" | grep \"FabricIngestionUri = \" | awk '{print $NF}' | tail -1)\r\n\r\nif [[ -z \"$FABRIC_URI\" ]]; then\r\n    warn \"Could not extract FabricIngestionUri from deployment output.\"\r\n    warn \"You can set it manually:\"\r\n    warn \"  az containerapp update --name $CONTAINER_APP_NAME --resource-group $AZURE_RESOURCE_GROUP --set-env-vars FabricIngestionUri=<uri>\"\r\n    # Write empty output so deploymentScript does not fail\r\n    echo '{\"fabricIngestionUri\":\"\"}' > \"${AZ_SCRIPTS_OUTPUT_PATH:-/dev/null}\"\r\n    exit 0\r\nfi\r\n\r\nok \"FabricIngestionUri: $FABRIC_URI\"\r\n\r\n# -- Update Container App env var ---------------------------------------------\r\n\r\ninfo \"Updating Container App '$CONTAINER_APP_NAME' with FabricIngestionUri...\"\r\naz containerapp update \\\r\n    --name \"$CONTAINER_APP_NAME\" \\\r\n    --resource-group \"$AZURE_RESOURCE_GROUP\" \\\r\n    --set-env-vars \"FabricIngestionUri=$FABRIC_URI\" \\\r\n    --output none\r\nok \"Container App updated — ISS Demo is now streaming to Fabric\"\r\n\r\n# -- Write outputs ------------------------------------------------------------\r\n\r\necho \"{\\\"fabricIngestionUri\\\": \\\"$FABRIC_URI\\\"}\" > \"${AZ_SCRIPTS_OUTPUT_PATH:-/dev/null}\"\r\ninfo \"Bootstrap complete.\"\r\n"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
+              "apiVersion": "2023-01-31",
+              "name": "uami-bootstrap-iss",
+              "location": "[parameters('location')]"
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "name": "[guid(resourceGroup().id, resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'uami-bootstrap-iss'), 'contributor-bootstrap')]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b24988ac-6180-42a0-ab88-20f7382dd24c')]",
+                "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'uami-bootstrap-iss'), '2023-01-31').principalId]",
+                "principalType": "ServicePrincipal"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'uami-bootstrap-iss')]"
+              ]
+            },
+            {
+              "type": "Microsoft.Resources/deploymentScripts",
+              "apiVersion": "2023-08-01",
+              "name": "bootstrap-fabric",
+              "location": "[parameters('location')]",
+              "kind": "AzureCLI",
+              "identity": {
+                "type": "UserAssigned",
+                "userAssignedIdentities": {
+                  "[format('{0}', resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'uami-bootstrap-iss'))]": {}
+                }
+              },
+              "properties": {
+                "azCliVersion": "2.59.0",
+                "timeout": "PT30M",
+                "retentionInterval": "PT1H",
+                "cleanupPreference": "OnSuccess",
+                "environmentVariables": [
+                  {
+                    "name": "FABRIC_CLIENT_ID",
+                    "value": "[parameters('fabricClientId')]"
+                  },
+                  {
+                    "name": "FABRIC_CLIENT_SECRET",
+                    "secureValue": "[parameters('fabricClientSecret')]"
+                  },
+                  {
+                    "name": "FABRIC_TENANT_ID",
+                    "value": "[parameters('fabricTenantId')]"
+                  },
+                  {
+                    "name": "FABRIC_WORKSPACE_ID",
+                    "value": "[parameters('fabricWorkspaceId')]"
+                  },
+                  {
+                    "name": "CONTAINER_APP_NAME",
+                    "value": "[parameters('containerAppName')]"
+                  },
+                  {
+                    "name": "AZURE_RESOURCE_GROUP",
+                    "value": "[parameters('resourceGroupName')]"
+                  },
+                  {
+                    "name": "DEPLOY_FABRIC_SCRIPT",
+                    "value": "[parameters('deployFabricScriptUrl')]"
+                  }
+                ],
+                "scriptContent": "[variables('$fxv#0')]"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'uami-bootstrap-iss')]",
+                "[resourceId('Microsoft.Authorization/roleAssignments', guid(resourceGroup().id, resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'uami-bootstrap-iss'), 'contributor-bootstrap'))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "fabricIngestionUri": {
+              "type": "string",
+              "metadata": {
+                "description": "Fabric Ingestion URI detected and applied to the Container App by the bootstrap script."
+              },
+              "value": "[coalesce(reference(resourceId('Microsoft.Resources/deploymentScripts', 'bootstrap-fabric'), '2023-08-01').outputs.fabricIngestionUri, '')]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Resources/deployments', 'container-app')]",
+        "[resourceId('Microsoft.Resources/deployments', 'role-assignments')]"
+      ]
+    }
+  ],
+  "outputs": {
+    "containerAppName": {
+      "type": "string",
+      "metadata": {
+        "description": "Name of the deployed Container App."
+      },
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'container-app'), '2025-04-01').outputs.containerAppName.value]"
+    },
+    "containerImageUri": {
+      "type": "string",
+      "metadata": {
+        "description": "Container image URI deployed."
+      },
+      "value": "[variables('effectiveImageUri')]"
+    },
+    "acrLoginServer": {
+      "type": "string",
+      "metadata": {
+        "description": "Container Registry login server."
+      },
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'container-registry'), '2025-04-01').outputs.loginServer.value]"
+    },
+    "fabricIngestionUri": {
+      "type": "string",
+      "metadata": {
+        "description": "Fabric Ingestion URI applied to the Container App (only set when bootstrap ran)."
+      },
+      "value": "[if(variables('bootstrapEnabled'), reference(resourceId('Microsoft.Resources/deployments', 'bootstrap'), '2025-04-01').outputs.fabricIngestionUri.value, parameters('fabricIngestionUri'))]"
+    }
+  }
+}

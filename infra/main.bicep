@@ -22,8 +22,32 @@ param fabricIngestionUri string = ''
 @description('Fabric KQL Database name to ingest data into.')
 param fabricDatabaseName string = 'iss-demo-kqldb'
 
+// ── Fabric Bootstrap parameters (optional — skip to configure Fabric manually) ──
+
+@description('''
+  Entra tenant ID for Fabric service principal authentication.
+  When provided together with fabricClientId, fabricClientSecret, and
+  fabricWorkspaceId, the deployment automatically provisions all Fabric
+  resources and configures the Container App — no manual steps required.
+  Leave blank to configure Fabric manually after deployment.
+''')
+param fabricTenantId string = ''
+
+@description('Application (client) ID of the service principal granted Member access to the Fabric workspace.')
+param fabricClientId string = ''
+
+@description('Client secret of the service principal. This value is never logged or stored in plain text.')
+@secure()
+param fabricClientSecret string = ''
+
+@description('Fabric workspace GUID (visible in the Fabric portal URL: app.fabric.microsoft.com/groups/<workspace-id>).')
+param fabricWorkspaceId string = ''
+
 // Normalize user-provided environment names for resource naming safety.
 var normalizedEnvironmentName = toLower(replace(replace(replace(environmentName, ' ', '-'), '_', '-'), '.', '-'))
+
+// Bootstrap is enabled when all four Fabric SP parameters are provided.
+var bootstrapEnabled = !empty(fabricTenantId) && !empty(fabricClientId) && !empty(fabricClientSecret) && !empty(fabricWorkspaceId)
 
 // ── Module: Monitoring (base — Log Analytics + App Insights) ────────────────
 
@@ -73,6 +97,23 @@ module roleAssignments 'modules/role-assignments.bicep' = {
   }
 }
 
+// ── Module: Bootstrap (Fabric setup — runs when SP credentials are provided) ─
+
+module bootstrap 'modules/bootstrap.bicep' = if (bootstrapEnabled) {
+  name: 'bootstrap'
+  params: {
+    location: location
+    containerAppName: containerApp.outputs.containerAppName
+    fabricWorkspaceId: fabricWorkspaceId
+    fabricTenantId: fabricTenantId
+    fabricClientId: fabricClientId
+    fabricClientSecret: fabricClientSecret
+  }
+  dependsOn: [
+    roleAssignments
+  ]
+}
+
 // ── Outputs ─────────────────────────────────────────────────────────────────
 
 @description('Name of the deployed Container App.')
@@ -83,4 +124,7 @@ output containerImageUri string = effectiveImageUri
 
 @description('Container Registry login server.')
 output acrLoginServer string = containerRegistry.outputs.loginServer
+
+@description('Fabric Ingestion URI applied to the Container App (only set when bootstrap ran).')
+output fabricIngestionUri string = bootstrapEnabled ? bootstrap!.outputs.fabricIngestionUri : fabricIngestionUri
 
